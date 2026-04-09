@@ -1,0 +1,1 @@
+# Temperature physics model placeholder.
