@@ -1,13 +1,15 @@
 FROM golang:1.23 AS builder
 
 ARG APP_NAME=sensimul
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/app ./cmd/${APP_NAME}
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/app ./cmd/${APP_NAME}
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates

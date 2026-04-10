@@ -11,6 +11,8 @@ services:
       dockerfile: Dockerfile
       args:
         APP_NAME: sensimul
+        TARGETOS: linux
+        TARGETARCH: ${TARGETARCH:-arm64}
     container_name: sensimul-app
     depends_on:
       - mqtt
@@ -26,11 +28,13 @@ services:
       dockerfile: Dockerfile
       args:
         APP_NAME: web
+        TARGETOS: linux
+        TARGETARCH: ${TARGETARCH:-arm64}
     container_name: sensimul-web
     depends_on:
       - mqtt
     ports:
-      - "8080:8080"
+      - "${WEB_PORT:-18080}:8080"
     volumes:
       - ./data:/app/data
       - ./config/sensimul.yaml:/app/config/sensimul.yaml:ro

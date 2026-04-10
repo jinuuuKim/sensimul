@@ -80,7 +80,7 @@ docker compose logs -f
 
 ```bash
 docker compose --profile web up -d --build
-curl -f http://localhost:8080/healthz
+curl -f http://localhost:18080/healthz
 ```
 
 Web UI routes:
