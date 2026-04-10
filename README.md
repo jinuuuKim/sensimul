@@ -14,6 +14,7 @@ SenSimul은 물류창고, 냉동창고, 야외적치장 등 다양한 현장의 
 - **날씨 API 연동**: 실외 현장은 실시간 기상 데이터 반영
 - **장애 시뮬레이션**: 센서 오류, 조절기 고장, 정전 등
 - **MQTT 통신**: 계층적 토픽 구조로 데이터 발행
+- **웹 클라이언트(분리 서비스)**: 사이트/센서/조절기 관리 및 실시간 데이터 확인
 
 ## 설치
 
@@ -38,6 +39,11 @@ make build
 ### 시뮬레이션 실행
 ```bash
 ./build/sensimul run --config config/sensimul.yaml
+```
+
+### 웹 클라이언트 실행 (선택)
+```bash
+docker compose --profile web up -d --build
 ```
 
 ## 라이선스

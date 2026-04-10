@@ -76,6 +76,20 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
+### Optional web profile (separate web service)
+
+```bash
+docker compose --profile web up -d --build
+curl -f http://localhost:8080/healthz
+```
+
+Web UI routes:
+
+- `/sites` site/sensor/controller CRUD entry
+- `/live` real-time sensor overview
+- `/docs/manual` user manual page
+- `/docs/mqtt` MQTT integration manual page
+
 ## 5) DietPi Deployment (192.168.0.11)
 
 1. Copy repository to server.

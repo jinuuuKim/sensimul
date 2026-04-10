@@ -20,3 +20,8 @@ weather:
 logging:
   level: info
   format: json
+
+web:
+  listen_addr: ":8080"
+  stale_after: 10s
+  sse_buffer: 256

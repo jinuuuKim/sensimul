@@ -20,6 +20,12 @@ build:
 	go build -o $(BUILD_DIR)/$(BINARY_NAME) $(CMD_PATH)
 	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
 
+build-web:
+	@echo "Building web binary..."
+	@mkdir -p $(BUILD_DIR)
+	go build -o $(BUILD_DIR)/sensimul-web ./cmd/web
+	@echo "Build complete: $(BUILD_DIR)/sensimul-web"
+
 test:
 	@echo "Running tests..."
 	go test ./...
@@ -75,6 +81,7 @@ vet:
 help:
 	@echo "SenSimul Makefile targets:"
 	@echo "  build         - Build the binary"
+	@echo "  build-web     - Build the web binary"
 	@echo "  test          - Run tests"
 	@echo "  test-race     - Run tests with race detector"
 	@echo "  test-coverage - Run tests with coverage report"

@@ -9,6 +9,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        APP_NAME: sensimul
     container_name: sensimul-app
     depends_on:
       - mqtt
@@ -16,3 +18,20 @@ services:
       - ./data:/app/data
       - ./config/sensimul.yaml:/app/config/sensimul.yaml:ro
     command: ["run", "--config", "/app/config/sensimul.yaml"]
+
+  web:
+    profiles: ["web"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_NAME: web
+    container_name: sensimul-web
+    depends_on:
+      - mqtt
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./config/sensimul.yaml:/app/config/sensimul.yaml:ro
+    command: ["--config", "/app/config/sensimul.yaml"]
