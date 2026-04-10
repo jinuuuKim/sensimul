@@ -1,0 +1,25 @@
+{{define "live"}}
+{{template "header" .}}
+<div class="card">
+  <h2>Live Sensor Overview</h2>
+  <p class="muted">Stale threshold: {{.StaleAfter}}</p>
+  <table id="live-table">
+    <thead><tr><th>Sensor</th><th>Type</th><th>Value</th><th>Status</th><th>Updated</th></tr></thead>
+    <tbody>
+    {{range .Live}}
+      <tr data-sensor-id="{{.SensorID}}">
+        <td><a href="/live/sensors/{{.SensorID}}">{{.SensorID}}</a></td>
+        <td>{{.SensorType}}</td>
+        <td class="value">{{printf "%.3f" .Value}}</td>
+        <td class="status">{{.Status}}</td>
+        <td class="updated">{{.LastUpdated}}</td>
+      </tr>
+    {{else}}
+      <tr><td colspan="5">No live data yet. Waiting for telemetry...</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+</div>
+<script>window.sensimulLiveStream && window.sensimulLiveStream('/events/live');</script>
+{{template "footer" .}}
+{{end}}

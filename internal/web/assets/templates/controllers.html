@@ -1,0 +1,36 @@
+{{define "controllers"}}
+{{template "header" .}}
+<div class="card">
+  <h2>Controllers for {{.Site.ID}}</h2>
+  <form method="post" action="/sites/{{.Site.ID}}/controllers" class="row">
+    <input name="id" placeholder="controller id" required />
+    <select name="type">
+      <option>cooling</option><option>heating</option><option>humidifying</option>
+      <option>dehumidifying</option><option>ventilation</option><option>air_purifier</option>
+    </select>
+    <button type="submit">Add Controller</button>
+  </form>
+</div>
+<div class="card">
+  <table>
+    <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Output</th><th>Action</th></tr></thead>
+    <tbody>
+    {{range .Controllers}}
+      <tr>
+        <td>{{.ID}}</td><td>{{.Type}}</td><td>{{.Status}}</td><td>{{.OutputLevel}}</td>
+        <td>
+          <a href="/sites/{{$.Site.ID}}/controllers/{{.ID}}/edit">edit</a>
+          <form method="post" action="/sites/{{$.Site.ID}}/controllers/{{.ID}}/delete" style="display:inline">
+            <button class="danger" type="submit">delete</button>
+          </form>
+        </td>
+      </tr>
+    {{else}}
+      <tr><td colspan="5">No controllers configured.</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+  <p><a href="/sites">← back</a></p>
+</div>
+{{template "footer" .}}
+{{end}}

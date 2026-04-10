@@ -1,0 +1,20 @@
+{{define "sensor-edit"}}
+{{template "header" .}}
+<div class="card">
+  <h2>Edit Sensor: {{.Sensor.ID}}</h2>
+  <p class="muted">Type is immutable in MVP: {{.Sensor.SensorType}}</p>
+  <form method="post" action="/sites/{{.Sensor.SiteID}}/sensors/{{.Sensor.ID}}/edit" class="row">
+    <select name="status">
+      <option value="normal" {{if eq .Sensor.Status "normal"}}selected{{end}}>normal</option>
+      <option value="degraded" {{if eq .Sensor.Status "degraded"}}selected{{end}}>degraded</option>
+      <option value="offline" {{if eq .Sensor.Status "offline"}}selected{{end}}>offline</option>
+      <option value="faulted" {{if eq .Sensor.Status "faulted"}}selected{{end}}>faulted</option>
+    </select>
+    <input name="calibration" value="{{.Sensor.Calibration}}" />
+    <input name="noise_sigma" value="{{.Sensor.NoiseSigma}}" />
+    <button type="submit">Save</button>
+  </form>
+  <p><a href="/sites/{{.Sensor.SiteID}}/sensors">← back</a></p>
+</div>
+{{template "footer" .}}
+{{end}}

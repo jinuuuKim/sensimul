@@ -1,0 +1,26 @@
+{{define "live-sensor"}}
+{{template "header" .}}
+<div class="card">
+  <h2>Live Sensor: {{.Sensor.ID}}</h2>
+  <p class="muted">Type: {{.Sensor.SensorType}} | Site: {{.Sensor.SiteID}}</p>
+  <p>Current: <strong id="live-current">{{printf "%.3f" .LiveOne.Value}}</strong> {{if .LiveOne.Unit}}{{.LiveOne.Unit}}{{end}}</p>
+  <p>Status: <span id="live-status">{{.LiveOne.Status}}</span></p>
+  <button id="sensor-test-btn" data-sensor-id="{{.Sensor.ID}}">Run One-shot Test</button>
+  <p id="sensor-test-result" class="muted">No test result yet.</p>
+</div>
+
+<div class="card">
+  <h3>Live Graph</h3>
+  <svg id="sensor-chart" class="chart" viewBox="0 0 800 220"></svg>
+</div>
+
+<script>
+window.sensimulSensorDetail && window.sensimulSensorDetail({
+  sensorId: '{{.Sensor.ID}}',
+  liveEventUrl: '/events/live',
+  testEventUrl: '/events/tests/{{.Sensor.ID}}',
+  testUrl: '/live/sensors/{{.Sensor.ID}}/test'
+});
+</script>
+{{template "footer" .}}
+{{end}}

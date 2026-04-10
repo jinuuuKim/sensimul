@@ -1,0 +1,20 @@
+{{define "site-edit"}}
+{{template "header" .}}
+<div class="card">
+  <h2>Edit Site: {{.Site.ID}}</h2>
+  <form method="post" action="/sites/{{.Site.ID}}/edit" class="row">
+    <input name="name" value="{{.Site.Name}}" required />
+    <select name="type">
+      <option value="indoor" {{if eq .Site.Type "indoor"}}selected{{end}}>indoor</option>
+      <option value="outdoor" {{if eq .Site.Type "outdoor"}}selected{{end}}>outdoor</option>
+    </select>
+    <input name="latitude" value="{{.Site.Latitude}}" />
+    <input name="longitude" value="{{.Site.Longitude}}" />
+    <input name="timezone" value="{{.Site.Timezone}}" />
+    <input name="elevation" value="{{.Site.Elevation}}" />
+    <button type="submit">Save</button>
+  </form>
+  <p><a href="/sites">← back</a></p>
+</div>
+{{template "footer" .}}
+{{end}}

@@ -1,0 +1,43 @@
+{{define "sites"}}
+{{template "header" .}}
+<div class="card">
+  <h2>Sites</h2>
+  <form method="post" action="/sites" class="row">
+    <input name="id" placeholder="id" required />
+    <input name="name" placeholder="name" required />
+    <select name="type"><option>indoor</option><option>outdoor</option></select>
+    <input name="latitude" placeholder="latitude" value="37.5665" />
+    <input name="longitude" placeholder="longitude" value="126.9780" />
+    <input name="timezone" placeholder="timezone" value="UTC" />
+    <input name="elevation" placeholder="elevation" value="0" />
+    <button type="submit">Add Site</button>
+  </form>
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Location</th><th>Action</th></tr></thead>
+    <tbody>
+    {{range .Sites}}
+      <tr>
+        <td>{{.ID}}</td>
+        <td>{{.Name}}</td>
+        <td>{{.Type}}</td>
+        <td>{{.Latitude}}, {{.Longitude}}</td>
+        <td>
+          <a href="/sites/{{.ID}}/edit">edit</a> |
+          <a href="/sites/{{.ID}}/sensors">sensors</a> |
+          <a href="/sites/{{.ID}}/controllers">controllers</a>
+          <form method="post" action="/sites/{{.ID}}/delete" style="display:inline">
+            <button type="submit" class="danger">delete</button>
+          </form>
+        </td>
+      </tr>
+    {{else}}
+      <tr><td colspan="5">No sites configured.</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+</div>
+{{template "footer" .}}
+{{end}}
