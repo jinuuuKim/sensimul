@@ -2,6 +2,7 @@ package physics
 
 import (
 	"math"
+	"math/rand"
 )
 
 type HumidityEngine struct {
@@ -10,6 +11,7 @@ type HumidityEngine struct {
 	K                   float64
 	HumidifyingEffect   float64
 	DehumidifyingEffect float64
+	NoiseSigma          float64
 }
 
 func NewHumidity(initial float64) *HumidityEngine {
@@ -17,6 +19,7 @@ func NewHumidity(initial float64) *HumidityEngine {
 		Current:         initial,
 		EvaporationRate: 0.5,
 		K:               0.05,
+		NoiseSigma:      0.1,
 	}
 }
 
@@ -29,7 +32,11 @@ func (e *HumidityEngine) SetDehumidifying(power float64) {
 }
 
 func (e *HumidityEngine) Step(dt float64) float64 {
-	e.Current += (e.EvaporationRate - e.K*e.Current + e.HumidifyingEffect + e.DehumidifyingEffect) * dt
+	ambientVariation := (rand.Float64() - 0.5) * 0.3
+	noise := (rand.Float64() - 0.5) * e.NoiseSigma * 2
+
+	e.Current += (e.EvaporationRate + ambientVariation - e.K*e.Current + e.HumidifyingEffect + e.DehumidifyingEffect) * dt
+	e.Current += noise * dt
 	e.Current = math.Max(0, math.Min(100, e.Current))
 	return e.Current
 }
