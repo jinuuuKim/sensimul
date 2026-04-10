@@ -1,0 +1,18 @@
+services:
+  mqtt:
+    image: eclipse-mosquitto:2
+    container_name: sensimul-mqtt
+    ports:
+      - "1883:1883"
+
+  sensimul:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sensimul-app
+    depends_on:
+      - mqtt
+    volumes:
+      - ./data:/app/data
+      - ./config/sensimul.yaml:/app/config/sensimul.yaml:ro
+    command: ["run", "--config", "/app/config/sensimul.yaml"]

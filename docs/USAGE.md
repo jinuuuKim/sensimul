@@ -1,0 +1,94 @@
+# SenSimul Usage Guide
+
+## 1) Prerequisites
+
+- Go 1.23+
+- Docker + Docker Compose (for container run)
+
+## 2) Local Build
+
+```bash
+make build
+```
+
+Binary output:
+
+```text
+build/sensimul
+```
+
+## 3) Core Commands
+
+All commands support `--config` (default: `config/sensimul.yaml`).
+
+### Health Check
+
+```bash
+./build/sensimul health --config config/sensimul.yaml
+```
+
+### Site Management
+
+```bash
+./build/sensimul site add --id SEOUL_WH --name "Seoul Warehouse" --type indoor --lat 37.5665 --lon 126.9780
+./build/sensimul site list
+```
+
+### Sensor Management
+
+```bash
+./build/sensimul sensor add --site SEOUL_WH --id TEMP_001 --type temperature
+./build/sensimul sensor add --site SEOUL_WH --id HUM_001 --type humidity
+./build/sensimul sensor list --site SEOUL_WH
+```
+
+### Controller Management
+
+```bash
+./build/sensimul controller add --site SEOUL_WH --id COOL_001 --type cooling
+./build/sensimul controller list --site SEOUL_WH
+```
+
+### Run Simulation
+
+```bash
+./build/sensimul run --config config/sensimul.yaml
+```
+
+MQTT topic format:
+
+```text
+sensimul/sites/{site_id}/sensors/{sensor_id}
+```
+
+## 4) Docker Run
+
+### MQTT only
+
+```bash
+docker compose -f docker-compose.mqtt.yml up -d
+```
+
+### Full stack (MQTT + SenSimul)
+
+```bash
+docker compose up -d --build
+docker compose logs -f
+```
+
+## 5) DietPi Deployment (192.168.0.11)
+
+1. Copy repository to server.
+2. Ensure Docker and Docker Compose plugin are installed.
+3. Run:
+
+```bash
+docker compose up -d --build
+```
+
+4. Verify service:
+
+```bash
+docker compose ps
+docker compose logs --tail=100 sensimul-app
+```

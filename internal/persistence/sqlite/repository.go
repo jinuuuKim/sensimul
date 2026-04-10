@@ -1,0 +1,269 @@
+package sqlite
+
+import (
+	"database/sql"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/sensimul/sensimul/internal/domain"
+	_ "modernc.org/sqlite"
+)
+
+var schemaSQL = `
+CREATE TABLE IF NOT EXISTS sites (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    latitude REAL NOT NULL,
+    longitude REAL NOT NULL,
+    timezone TEXT NOT NULL,
+    elevation REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sensors (
+    id TEXT PRIMARY KEY,
+    site_id TEXT NOT NULL,
+    sensor_type TEXT NOT NULL,
+    value_kind TEXT NOT NULL,
+    source_channel TEXT NOT NULL,
+    unit TEXT,
+    status TEXT NOT NULL,
+    calibration REAL NOT NULL DEFAULT 1.0,
+    noise_sigma REAL NOT NULL DEFAULT 0.0,
+    FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS controllers (
+    id TEXT PRIMARY KEY,
+    site_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    target_axis TEXT NOT NULL,
+    status TEXT NOT NULL,
+    output_level INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
+);
+`
+
+type Repository struct {
+	db *sql.DB
+}
+
+func New(dbPath string) (*Repository, error) {
+	dir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create db directory: %w", err)
+	}
+
+	db, err := sql.Open("sqlite", dbPath+"?_foreign_keys=ON&_journal_mode=WAL")
+	if err != nil {
+		return nil, fmt.Errorf("failed to open db: %w", err)
+	}
+
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping db: %w", err)
+	}
+
+	r := &Repository{db: db}
+	if err := r.initSchema(); err != nil {
+		return nil, fmt.Errorf("failed to init schema: %w", err)
+	}
+
+	return r, nil
+}
+
+func (r *Repository) initSchema() error {
+	_, err := r.db.Exec(schemaSQL)
+	return err
+}
+
+func (r *Repository) Close() error {
+	return r.db.Close()
+}
+
+func (r *Repository) DB() *sql.DB {
+	return r.db
+}
+
+func (r *Repository) CreateSite(site *domain.Site) error {
+	if err := site.Validate(); err != nil {
+		return err
+	}
+
+	_, err := r.db.Exec(
+		`INSERT INTO sites (id, name, type, latitude, longitude, timezone, elevation) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		site.ID, site.Name, string(site.Type), site.Latitude, site.Longitude, site.Timezone, site.Elevation,
+	)
+	if err != nil {
+		return fmt.Errorf("insert site: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) GetSite(id string) (*domain.Site, error) {
+	row := r.db.QueryRow(`SELECT id, name, type, latitude, longitude, timezone, elevation FROM sites WHERE id = ?`, id)
+
+	var site domain.Site
+	var siteType string
+	if err := row.Scan(&site.ID, &site.Name, &siteType, &site.Latitude, &site.Longitude, &site.Timezone, &site.Elevation); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("query site: %w", err)
+	}
+
+	site.Type = domain.SiteType(siteType)
+	site.UpdateEnv(defaultEnvironment(site.Type))
+	return &site, nil
+}
+
+func (r *Repository) ListSites() ([]domain.Site, error) {
+	rows, err := r.db.Query(`SELECT id, name, type, latitude, longitude, timezone, elevation FROM sites ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("list sites: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]domain.Site, 0)
+	for rows.Next() {
+		var site domain.Site
+		var siteType string
+		if err := rows.Scan(&site.ID, &site.Name, &siteType, &site.Latitude, &site.Longitude, &site.Timezone, &site.Elevation); err != nil {
+			return nil, fmt.Errorf("scan site: %w", err)
+		}
+		site.Type = domain.SiteType(siteType)
+		site.UpdateEnv(defaultEnvironment(site.Type))
+		items = append(items, site)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate sites: %w", err)
+	}
+
+	return items, nil
+}
+
+func (r *Repository) CreateSensor(sensor *domain.Sensor) error {
+	if err := sensor.Validate(); err != nil {
+		return err
+	}
+
+	_, err := r.db.Exec(
+		`INSERT INTO sensors (id, site_id, sensor_type, value_kind, source_channel, unit, status, calibration, noise_sigma) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sensor.ID,
+		sensor.SiteID,
+		sensor.SensorType,
+		string(sensor.ValueKind),
+		sensor.SourceChannel,
+		sensor.Unit,
+		string(sensor.Status),
+		sensor.Calibration,
+		sensor.NoiseSigma,
+	)
+	if err != nil {
+		return fmt.Errorf("insert sensor: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) ListSensors(siteID string) ([]domain.Sensor, error) {
+	rows, err := r.db.Query(
+		`SELECT id, site_id, sensor_type, value_kind, source_channel, unit, status, calibration, noise_sigma FROM sensors WHERE site_id = ? ORDER BY id`,
+		siteID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list sensors: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]domain.Sensor, 0)
+	for rows.Next() {
+		var sensor domain.Sensor
+		if err := rows.Scan(
+			&sensor.ID,
+			&sensor.SiteID,
+			&sensor.SensorType,
+			&sensor.ValueKind,
+			&sensor.SourceChannel,
+			&sensor.Unit,
+			&sensor.Status,
+			&sensor.Calibration,
+			&sensor.NoiseSigma,
+		); err != nil {
+			return nil, fmt.Errorf("scan sensor: %w", err)
+		}
+		items = append(items, sensor)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate sensors: %w", err)
+	}
+
+	return items, nil
+}
+
+func (r *Repository) CreateController(ctrl *domain.Controller) error {
+	if err := ctrl.Validate(); err != nil {
+		return err
+	}
+
+	_, err := r.db.Exec(
+		`INSERT INTO controllers (id, site_id, type, target_axis, status, output_level) VALUES (?, ?, ?, ?, ?, ?)`,
+		ctrl.ID,
+		ctrl.SiteID,
+		string(ctrl.Type),
+		string(ctrl.TargetAxis),
+		string(ctrl.Status),
+		ctrl.OutputLevel,
+	)
+	if err != nil {
+		return fmt.Errorf("insert controller: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) ListControllers(siteID string) ([]domain.Controller, error) {
+	rows, err := r.db.Query(
+		`SELECT id, site_id, type, target_axis, status, output_level FROM controllers WHERE site_id = ? ORDER BY id`,
+		siteID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list controllers: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]domain.Controller, 0)
+	for rows.Next() {
+		var ctrl domain.Controller
+		if err := rows.Scan(&ctrl.ID, &ctrl.SiteID, &ctrl.Type, &ctrl.TargetAxis, &ctrl.Status, &ctrl.OutputLevel); err != nil {
+			return nil, fmt.Errorf("scan controller: %w", err)
+		}
+		items = append(items, ctrl)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate controllers: %w", err)
+	}
+
+	return items, nil
+}
+
+func defaultEnvironment(siteType domain.SiteType) domain.EnvironmentState {
+	if siteType == domain.SiteTypeIndoor {
+		return domain.EnvironmentState{
+			TemperatureC: 22,
+			HumidityPct:  50,
+			PM25UgM3:     15,
+			PM10UgM3:     30,
+			PressureHPA:  1013.25,
+		}
+	}
+
+	return domain.EnvironmentState{
+		TemperatureC: 20,
+		HumidityPct:  60,
+		PM25UgM3:     20,
+		PM10UgM3:     40,
+		PressureHPA:  1013.25,
+	}
+}

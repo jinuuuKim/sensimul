@@ -1,0 +1,22 @@
+mode: dev
+seed: 42
+tick_interval: 1s
+site_id: ""
+
+sqlite:
+  path: data/sensimul.db
+
+mqtt:
+  broker_url: tcp://mqtt:1883
+  client_id: sensimul-local
+  qos: 1
+  retain: false
+
+weather:
+  mode: synthetic
+  api_key: ""
+  ttl: 300s
+
+logging:
+  level: info
+  format: json

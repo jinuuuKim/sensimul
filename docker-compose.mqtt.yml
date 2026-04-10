@@ -1,0 +1,6 @@
+services:
+  mqtt:
+    image: eclipse-mosquitto:2
+    container_name: sensimul-mqtt
+    ports:
+      - "1883:1883"

@@ -4,7 +4,7 @@
 
 ## 개요
 
-SenSimul은 물류창고, 냉동창고, 야외적치장 등 다양한 현장의 환경 데이터를 시뮬레이션하는 Python 기반 CLI 도구입니다.
+SenSimul은 물류창고, 냉동창고, 야외적치장 등 다양한 현장의 환경 데이터를 시뮬레이션하는 Go 기반 CLI 도구입니다.
 
 ## 특징
 
@@ -20,24 +20,24 @@ SenSimul은 물류창고, 냉동창고, 야외적치장 등 다양한 현장의 
 ```bash
 git clone https://gitlab.ithans.com/solcloud_team/sensimul.git
 cd sensimul
-pip install -r requirements.txt
+make build
 ```
 
 ## 사용법
 
 ### 현장 생성
 ```bash
-sensimul site add "서울냉동창고" --type indoor --location "37.5665,126.9780"
+./build/sensimul site add --id SEOUL_COLD --name "서울냉동창고" --type indoor --lat 37.5665 --lon 126.9780
 ```
 
 ### 센서 추가
 ```bash
-sensimul sensor add "서울냉동창고" --type temperature --id TEMP_001
+./build/sensimul sensor add --site SEOUL_COLD --type temperature --id TEMP_001
 ```
 
 ### 시뮬레이션 실행
 ```bash
-sensimul run --site "서울냉동창고" --interval 10s
+./build/sensimul run --config config/sensimul.yaml
 ```
 
 ## 라이선스
