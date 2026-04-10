@@ -54,6 +54,24 @@ func (s *State) AddController(ctrl *domain.Controller) {
 	s.Controllers = append(s.Controllers, ctrl)
 }
 
+func (s *State) UpdateSensors(sensors []domain.Sensor) {
+	newSensors := make([]*domain.Sensor, len(sensors))
+	for i := range sensors {
+		sensor := sensors[i]
+		newSensors[i] = &sensor
+	}
+	s.Sensors = newSensors
+}
+
+func (s *State) UpdateControllers(controllers []domain.Controller) {
+	newControllers := make([]*domain.Controller, len(controllers))
+	for i := range controllers {
+		ctrl := controllers[i]
+		newControllers[i] = &ctrl
+	}
+	s.Controllers = newControllers
+}
+
 func (s *State) AdvanceTick() {
 	if s.Frozen {
 		return

@@ -131,6 +131,8 @@ func (a *App) Run(ctx context.Context) error {
 		clock.NewReal(a.Config.TickInterval),
 		a.Publisher,
 		a.Weather,
+		a.Repo,
+		site.ID,
 	)
 
 	a.Logger.Info().

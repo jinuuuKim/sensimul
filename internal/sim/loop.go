@@ -12,20 +12,25 @@ import (
 	"github.com/sensimul/sensimul/internal/logging"
 	"github.com/sensimul/sensimul/internal/mqtt"
 	"github.com/sensimul/sensimul/internal/payload"
+	"github.com/sensimul/sensimul/internal/persistence/sqlite"
 	"github.com/sensimul/sensimul/internal/weather"
 )
 
 type Loop struct {
-	state      *State
-	clock      clock.Clock
-	publisher  *mqtt.Publisher
-	weatherSvc *weather.Client
-	logger     zerolog.Logger
-	cfg        LoopConfig
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
-	testReqCh  chan mqtt.SensorTestRequest
+	state               *State
+	clock               clock.Clock
+	publisher           *mqtt.Publisher
+	weatherSvc          *weather.Client
+	logger              zerolog.Logger
+	cfg                 LoopConfig
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	wg                  sync.WaitGroup
+	testReqCh           chan mqtt.SensorTestRequest
+	repo                *sqlite.Repository
+	siteID              string
+	configCheckInterval time.Duration
+	lastConfigCheck     time.Time
 }
 
 type LoopConfig struct {
@@ -34,16 +39,20 @@ type LoopConfig struct {
 	Seed         int64
 }
 
-func NewLoop(state *State, cfg LoopConfig, clk clock.Clock, publisher *mqtt.Publisher, weatherSvc *weather.Client) *Loop {
+func NewLoop(state *State, cfg LoopConfig, clk clock.Clock, publisher *mqtt.Publisher, weatherSvc *weather.Client, repo *sqlite.Repository, siteID string) *Loop {
 	logger := logging.NewLogger("sim")
 	return &Loop{
-		state:      state,
-		clock:      clk,
-		publisher:  publisher,
-		weatherSvc: weatherSvc,
-		logger:     logger,
-		cfg:        cfg,
-		testReqCh:  make(chan mqtt.SensorTestRequest, 64),
+		state:               state,
+		clock:               clk,
+		publisher:           publisher,
+		weatherSvc:          weatherSvc,
+		logger:              logger,
+		cfg:                 cfg,
+		testReqCh:           make(chan mqtt.SensorTestRequest, 64),
+		repo:                repo,
+		siteID:              siteID,
+		configCheckInterval: 30 * time.Second,
+		lastConfigCheck:     time.Now(),
 	}
 }
 
@@ -60,21 +69,65 @@ func (l *Loop) Start(ctx context.Context) error {
 		l.logger.Warn().Err(err).Msg("test request subscription failed")
 	}
 
+	ticker := time.NewTicker(l.cfg.TickInterval)
+	defer ticker.Stop()
+
+	configTicker := time.NewTicker(l.configCheckInterval)
+	defer configTicker.Stop()
+
 	for {
 		select {
 		case <-l.ctx.Done():
 			l.logger.Info().Uint64("ticks", l.state.TickCount).Msg("simulation loop stopped")
 			return nil
-		default:
+		case <-ticker.C:
 			if err := l.tick(); err != nil {
 				l.logger.Error().Err(err).Msg("tick error")
 			}
-
-			if l.cfg.TickInterval > 0 {
-				time.Sleep(l.cfg.TickInterval)
+		case <-configTicker.C:
+			if err := l.reloadConfiguration(); err != nil {
+				l.logger.Error().Err(err).Msg("config reload error")
 			}
 		}
 	}
+}
+
+func (l *Loop) reloadConfiguration() error {
+	if l.repo == nil {
+		return nil
+	}
+
+	l.logger.Debug().Msg("checking for configuration updates")
+
+	sensors, err := l.repo.ListSensors(l.siteID)
+	if err != nil {
+		return err
+	}
+
+	controllers, err := l.repo.ListControllers(l.siteID)
+	if err != nil {
+		return err
+	}
+
+	oldSensorCount := len(l.state.Sensors)
+	oldControllerCount := len(l.state.Controllers)
+
+	l.state.UpdateSensors(sensors)
+	l.state.UpdateControllers(controllers)
+
+	newSensorCount := len(l.state.Sensors)
+	newControllerCount := len(l.state.Controllers)
+
+	if oldSensorCount != newSensorCount || oldControllerCount != newControllerCount {
+		l.logger.Info().
+			Int("old_sensors", oldSensorCount).
+			Int("new_sensors", newSensorCount).
+			Int("old_controllers", oldControllerCount).
+			Int("new_controllers", newControllerCount).
+			Msg("configuration updated")
+	}
+
+	return nil
 }
 
 func (l *Loop) tick() error {
@@ -110,6 +163,8 @@ func (l *Loop) tick() error {
 		Uint64("tick", l.state.TickCount).
 		Float64("temp", l.state.TempEngine.Current).
 		Float64("humidity", l.state.HumidityEngine.Current).
+		Int("sensors", len(l.state.Sensors)).
+		Int("controllers", len(l.state.Controllers)).
 		Msg("tick complete")
 
 	return nil
