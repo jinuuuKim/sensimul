@@ -18,6 +18,7 @@ type Config struct {
 	MQTT         MQTTConfig    `mapstructure:"mqtt"`
 	Weather      WeatherConfig `mapstructure:"weather"`
 	Logging      LoggingConfig `mapstructure:"logging"`
+	Web          WebConfig     `mapstructure:"web"`
 }
 
 type SQLiteConfig struct {
@@ -42,6 +43,13 @@ type LoggingConfig struct {
 	Format string `mapstructure:"format"`
 }
 
+// WebConfig controls the standalone web client service runtime.
+type WebConfig struct {
+	ListenAddr string        `mapstructure:"listen_addr"`
+	StaleAfter time.Duration `mapstructure:"stale_after"`
+	SSEBuffer  int           `mapstructure:"sse_buffer"`
+}
+
 var defaultConfig = Config{
 	Mode:         "dev",
 	Seed:         1,
@@ -61,6 +69,11 @@ var defaultConfig = Config{
 	Logging: LoggingConfig{
 		Level:  "info",
 		Format: "json",
+	},
+	Web: WebConfig{
+		ListenAddr: ":8080",
+		StaleAfter: 10 * time.Second,
+		SSEBuffer:  256,
 	},
 }
 
@@ -110,6 +123,15 @@ func validate(c *Config) error {
 	}
 	if c.MQTT.QoS > 2 {
 		return fmt.Errorf("mqtt qos must be 0|1|2")
+	}
+	if c.Web.ListenAddr == "" {
+		return fmt.Errorf("web.listen_addr cannot be empty")
+	}
+	if c.Web.StaleAfter <= 0 {
+		return fmt.Errorf("web.stale_after must be positive")
+	}
+	if c.Web.SSEBuffer < 1 {
+		return fmt.Errorf("web.sse_buffer must be at least 1")
 	}
 	return nil
 }

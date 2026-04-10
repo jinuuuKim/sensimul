@@ -2,6 +2,7 @@ package mqtt
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -75,7 +76,7 @@ func (p *Publisher) PublishSensor(ctx context.Context, siteID, sensorID string, 
 		return fmt.Errorf("mqtt not connected")
 	}
 
-	topic := fmt.Sprintf("sensimul/sites/%s/sensors/%s", siteID, sensorID)
+	topic := TopicLiveSensor(siteID, sensorID)
 	token := p.client.Publish(topic, p.opts.QoS, p.opts.Retain, payload)
 	if !token.WaitTimeout(5 * time.Second) {
 		return fmt.Errorf("mqtt publish timeout: %s", topic)
@@ -89,6 +90,95 @@ func (p *Publisher) PublishSensor(ctx context.Context, siteID, sensorID string, 
 		return ctx.Err()
 	default:
 	}
+
+	return nil
+}
+
+func (p *Publisher) PublishTestRequest(ctx context.Context, req SensorTestRequest) error {
+	if p == nil {
+		return nil
+	}
+	if p.client == nil || !p.client.IsConnectionOpen() {
+		return fmt.Errorf("mqtt not connected")
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("marshal test request: %w", err)
+	}
+
+	topic := TopicTestRequest(req.SiteID, req.SensorID)
+	token := p.client.Publish(topic, p.opts.QoS, false, body)
+	if !token.WaitTimeout(5 * time.Second) {
+		return fmt.Errorf("mqtt publish timeout: %s", topic)
+	}
+	if err := token.Error(); err != nil {
+		return err
+	}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	return nil
+}
+
+func (p *Publisher) PublishTestResult(ctx context.Context, result SensorTestResult) error {
+	if p == nil {
+		return nil
+	}
+	if p.client == nil || !p.client.IsConnectionOpen() {
+		return fmt.Errorf("mqtt not connected")
+	}
+
+	body, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("marshal test result: %w", err)
+	}
+
+	topic := TopicTestResult(result.SiteID, result.SensorID)
+	token := p.client.Publish(topic, p.opts.QoS, false, body)
+	if !token.WaitTimeout(5 * time.Second) {
+		return fmt.Errorf("mqtt publish timeout: %s", topic)
+	}
+	if err := token.Error(); err != nil {
+		return err
+	}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	return nil
+}
+
+func (p *Publisher) Subscribe(ctx context.Context, topic string, handler func(topic string, payload []byte)) error {
+	if p == nil {
+		return nil
+	}
+	if p.client == nil || !p.client.IsConnectionOpen() {
+		return fmt.Errorf("mqtt not connected")
+	}
+
+	token := p.client.Subscribe(topic, p.opts.QoS, func(_ paho.Client, msg paho.Message) {
+		handler(msg.Topic(), msg.Payload())
+	})
+	if !token.WaitTimeout(10 * time.Second) {
+		return fmt.Errorf("mqtt subscribe timeout: %s", topic)
+	}
+	if err := token.Error(); err != nil {
+		return err
+	}
+
+	go func() {
+		<-ctx.Done()
+		ut := p.client.Unsubscribe(topic)
+		ut.WaitTimeout(3 * time.Second)
+	}()
 
 	return nil
 }

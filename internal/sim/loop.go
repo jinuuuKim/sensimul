@@ -2,6 +2,7 @@ package sim
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -24,6 +25,7 @@ type Loop struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
+	testReqCh  chan mqtt.SensorTestRequest
 }
 
 type LoopConfig struct {
@@ -41,6 +43,7 @@ func NewLoop(state *State, cfg LoopConfig, clk clock.Clock, publisher *mqtt.Publ
 		weatherSvc: weatherSvc,
 		logger:     logger,
 		cfg:        cfg,
+		testReqCh:  make(chan mqtt.SensorTestRequest, 64),
 	}
 }
 
@@ -52,6 +55,10 @@ func (l *Loop) Start(ctx context.Context) error {
 		Dur("tick_interval", l.cfg.TickInterval).
 		Int64("seed", l.cfg.Seed).
 		Msg("simulation loop starting")
+
+	if err := l.subscribeTestRequests(); err != nil {
+		l.logger.Warn().Err(err).Msg("test request subscription failed")
+	}
 
 	for {
 		select {
@@ -85,6 +92,7 @@ func (l *Loop) tick() error {
 	}
 
 	l.resolveControllers()
+	l.processTestRequests()
 	dt := l.tickSeconds()
 
 	temp := l.state.TempEngine.Step(dt)
@@ -104,6 +112,84 @@ func (l *Loop) tick() error {
 		Float64("humidity", l.state.HumidityEngine.Current).
 		Msg("tick complete")
 
+	return nil
+}
+
+func (l *Loop) subscribeTestRequests() error {
+	if l.publisher == nil {
+		return nil
+	}
+
+	return l.publisher.Subscribe(l.ctx, mqtt.TopicTestRequestFilter(), func(topic string, body []byte) {
+		kind, siteID, sensorID, ok := mqtt.ParseTestTopic(topic)
+		if !ok || kind != "requests" || siteID != l.state.Site.ID {
+			return
+		}
+
+		var req mqtt.SensorTestRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			l.logger.Warn().Err(err).Str("topic", topic).Msg("invalid test request payload")
+			return
+		}
+
+		if req.SiteID == "" {
+			req.SiteID = siteID
+		}
+		if req.SensorID == "" {
+			req.SensorID = sensorID
+		}
+
+		select {
+		case l.testReqCh <- req:
+		default:
+			l.logger.Warn().Str("sensor_id", req.SensorID).Msg("test request dropped: queue full")
+		}
+	})
+}
+
+func (l *Loop) processTestRequests() {
+	if l.publisher == nil {
+		return
+	}
+
+	for {
+		select {
+		case req := <-l.testReqCh:
+			sensor := l.findSensor(req.SensorID)
+			if sensor == nil {
+				continue
+			}
+
+			value, ok := l.sensorValue(sensor.SourceChannel)
+			if !ok {
+				continue
+			}
+
+			result := mqtt.NewSensorTestResult(
+				req.SiteID,
+				req.SensorID,
+				sensor.SensorType,
+				value,
+				sensor.Unit,
+				string(sensor.Status),
+				l.state.TickCount,
+			)
+
+			if err := l.publisher.PublishTestResult(l.ctx, result); err != nil {
+				l.logger.Warn().Err(err).Str("sensor_id", req.SensorID).Msg("failed to publish test result")
+			}
+		default:
+			return
+		}
+	}
+}
+
+func (l *Loop) findSensor(sensorID string) *domain.Sensor {
+	for _, sensor := range l.state.Sensors {
+		if sensor.ID == sensorID {
+			return sensor
+		}
+	}
 	return nil
 }
 
