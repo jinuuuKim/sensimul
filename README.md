@@ -425,8 +425,3 @@ MIT License - 자세한 내용은 [LICENSE](LICENSE) 파일을 참조하세요.
 ## 🤝 기여
 
 버그 리포트, 기능 요청, PR은 언제나 환영합니다!
-
-## 📞 문의
-
-- GitLab: https://gitlab.ithans.com/solcloud_team/sensimul
-- Issues: https://gitlab.ithans.com/solcloud_team/sensimul/-/issues
