@@ -53,7 +53,7 @@ type WebConfig struct {
 var defaultConfig = Config{
 	Mode:         "dev",
 	Seed:         1,
-	TickInterval: time.Second,
+	TickInterval: 5 * time.Second,
 	SQLite: SQLiteConfig{
 		Path: "data/sensimul.db",
 	},

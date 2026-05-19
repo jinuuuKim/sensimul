@@ -3,6 +3,7 @@ package sim
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -31,6 +32,7 @@ type Loop struct {
 	siteID              string
 	configCheckInterval time.Duration
 	lastConfigCheck     time.Time
+	defaultTickInterval time.Duration
 }
 
 type LoopConfig struct {
@@ -51,8 +53,9 @@ func NewLoop(state *State, cfg LoopConfig, clk clock.Clock, publisher *mqtt.Publ
 		testReqCh:           make(chan mqtt.SensorTestRequest, 64),
 		repo:                repo,
 		siteID:              siteID,
-		configCheckInterval: 30 * time.Second,
+		configCheckInterval: 2 * time.Second,
 		lastConfigCheck:     time.Now(),
+		defaultTickInterval: cfg.TickInterval,
 	}
 }
 
@@ -69,7 +72,13 @@ func (l *Loop) Start(ctx context.Context) error {
 		l.logger.Warn().Err(err).Msg("test request subscription failed")
 	}
 
-	ticker := time.NewTicker(l.cfg.TickInterval)
+	tickInterval, err := l.runtimeTickInterval()
+	if err != nil {
+		return err
+	}
+	l.cfg.TickInterval = tickInterval
+
+	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
 
 	configTicker := time.NewTicker(l.configCheckInterval)
@@ -85,11 +94,52 @@ func (l *Loop) Start(ctx context.Context) error {
 				l.logger.Error().Err(err).Msg("tick error")
 			}
 		case <-configTicker.C:
+			if err := l.reloadRuntimeTickInterval(ticker); err != nil {
+				l.logger.Error().Err(err).Msg("runtime interval reload error")
+			}
 			if err := l.reloadConfiguration(); err != nil {
 				l.logger.Error().Err(err).Msg("config reload error")
 			}
 		}
 	}
+}
+
+func (l *Loop) runtimeTickInterval() (time.Duration, error) {
+	interval := l.defaultTickInterval
+	if interval <= 0 {
+		interval = l.cfg.TickInterval
+	}
+
+	if l.repo != nil {
+		configured, ok, err := l.repo.GetRuntimeDuration(sqlite.RuntimeSettingTickInterval)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
+			interval = configured
+		}
+	}
+
+	if interval <= 0 {
+		return 0, fmt.Errorf("tick interval must be positive")
+	}
+	return interval, nil
+}
+
+func (l *Loop) reloadRuntimeTickInterval(ticker *time.Ticker) error {
+	interval, err := l.runtimeTickInterval()
+	if err != nil {
+		return err
+	}
+	if interval == l.cfg.TickInterval {
+		return nil
+	}
+
+	ticker.Reset(interval)
+	old := l.cfg.TickInterval
+	l.cfg.TickInterval = interval
+	l.logger.Info().Dur("old_tick_interval", old).Dur("tick_interval", interval).Msg("runtime tick interval updated")
+	return nil
 }
 
 func (l *Loop) reloadConfiguration() error {

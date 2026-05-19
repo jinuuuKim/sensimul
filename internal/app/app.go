@@ -99,9 +99,9 @@ func (a *App) Run(ctx context.Context) error {
 		return err
 	}
 
-	controllers, err := a.Repo.ListControllers(site.ID)
+	controllers, err := a.bootstrapControllers(site)
 	if err != nil {
-		return domain.NewRuntimeError("failed to load controllers", err)
+		return err
 	}
 
 	if a.Publisher != nil {
@@ -154,7 +154,11 @@ func (a *App) bootstrapSite() (*domain.Site, error) {
 			return nil, domain.NewRuntimeError("failed to load configured site", err)
 		}
 		if site == nil {
-			return nil, domain.NewValidationError(fmt.Sprintf("configured site not found: %s", a.Config.SiteID))
+			site = domain.NewSite(a.Config.SiteID, defaultSiteName(a.Config.SiteID), domain.SiteTypeIndoor, 37.5665, 126.9780)
+			site.Timezone = "Asia/Seoul"
+			if err := a.Repo.CreateSite(site); err != nil {
+				return nil, domain.NewRuntimeError("failed to create configured site", err)
+			}
 		}
 		return site, nil
 	}
@@ -185,13 +189,7 @@ func (a *App) bootstrapSensors(siteID string) ([]domain.Sensor, error) {
 		return sensors, nil
 	}
 
-	defaults := []struct {
-		id       string
-		typeName string
-	}{
-		{id: "TEMP_001", typeName: "temperature"},
-		{id: "HUM_001", typeName: "humidity"},
-	}
+	defaults := defaultSensorDefinitions(siteID)
 
 	for _, item := range defaults {
 		sensor, err := domain.NewSensor(item.id, siteID, item.typeName)
@@ -204,4 +202,77 @@ func (a *App) bootstrapSensors(siteID string) ([]domain.Sensor, error) {
 	}
 
 	return a.Repo.ListSensors(siteID)
+}
+
+func (a *App) bootstrapControllers(site *domain.Site) ([]domain.Controller, error) {
+	controllers, err := a.Repo.ListControllers(site.ID)
+	if err != nil {
+		return nil, domain.NewRuntimeError("failed to load controllers", err)
+	}
+	if len(controllers) > 0 || !site.SupportsControllers() {
+		return controllers, nil
+	}
+
+	for _, item := range defaultControllerDefinitions(site.ID) {
+		controller, err := domain.NewController(item.id, site.ID, item.controllerType, site.Type)
+		if err != nil {
+			return nil, domain.NewRuntimeError("failed to create default controller", err)
+		}
+		if err := a.Repo.CreateController(controller); err != nil {
+			return nil, domain.NewRuntimeError("failed to persist default controller", err)
+		}
+	}
+
+	return a.Repo.ListControllers(site.ID)
+}
+
+func defaultSiteName(siteID string) string {
+	if siteID == "SEOUL_COLD_CHAIN_01" {
+		return "서울 냉장 물류센터 A동"
+	}
+	return fmt.Sprintf("Configured Site %s", siteID)
+}
+
+func defaultSensorDefinitions(siteID string) []struct {
+	id       string
+	typeName string
+} {
+	if siteID == "SEOUL_COLD_CHAIN_01" {
+		return []struct {
+			id       string
+			typeName string
+		}{
+			{id: "TEMP_A01", typeName: "temperature"},
+			{id: "HUM_A01", typeName: "humidity"},
+			{id: "PM25_A01", typeName: "pm25"},
+			{id: "DOOR_A01", typeName: "door_open"},
+			{id: "MOTION_A01", typeName: "presence_detected"},
+		}
+	}
+
+	return []struct {
+		id       string
+		typeName string
+	}{
+		{id: "TEMP_001", typeName: "temperature"},
+		{id: "HUM_001", typeName: "humidity"},
+	}
+}
+
+func defaultControllerDefinitions(siteID string) []struct {
+	id             string
+	controllerType domain.ControllerType
+} {
+	if siteID == "SEOUL_COLD_CHAIN_01" {
+		return []struct {
+			id             string
+			controllerType domain.ControllerType
+		}{
+			{id: "COOL_A01", controllerType: domain.Cooling},
+			{id: "DEHUM_A01", controllerType: domain.Dehumidifying},
+			{id: "PURIFIER_A01", controllerType: domain.AirPurifier},
+		}
+	}
+
+	return nil
 }

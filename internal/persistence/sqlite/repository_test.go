@@ -3,6 +3,7 @@ package sqlite
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/sensimul/sensimul/internal/domain"
 )
@@ -58,5 +59,41 @@ func TestRepositoryCRUD(t *testing.T) {
 	}
 	if err := repo.DeleteSite(site.ID); err != nil {
 		t.Fatalf("delete site: %v", err)
+	}
+}
+
+func TestRepositoryRuntimeDurationSetting(t *testing.T) {
+	repo, err := New(filepath.Join(t.TempDir(), "sensimul.db"))
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	if got, ok, err := repo.GetRuntimeDuration(RuntimeSettingTickInterval); err != nil {
+		t.Fatalf("get missing setting: %v", err)
+	} else if ok {
+		t.Fatalf("expected missing setting, got %s", got)
+	}
+
+	if err := repo.SetRuntimeDuration(RuntimeSettingTickInterval, 750*time.Millisecond); err != nil {
+		t.Fatalf("set duration: %v", err)
+	}
+
+	got, ok, err := repo.GetRuntimeDuration(RuntimeSettingTickInterval)
+	if err != nil {
+		t.Fatalf("get duration: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected duration setting to exist")
+	}
+	if got != 750*time.Millisecond {
+		t.Fatalf("expected 750ms, got %s", got)
+	}
+
+	if err := repo.SetRuntimeDuration(RuntimeSettingTickInterval, 2*time.Second); err != nil {
+		t.Fatalf("update duration: %v", err)
+	}
+	if got, _, _ := repo.GetRuntimeDuration(RuntimeSettingTickInterval); got != 2*time.Second {
+		t.Fatalf("expected updated duration 2s, got %s", got)
 	}
 }

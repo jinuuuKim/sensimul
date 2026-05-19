@@ -45,21 +45,22 @@ type Server struct {
 }
 
 type viewData struct {
-	Title       string
-	Path        string
-	Error       string
-	Success     string
-	Sites       []domain.Site
-	Site        *domain.Site
-	Sensors     []domain.Sensor
-	Sensor      *domain.Sensor
-	Controllers []domain.Controller
-	Controller  *domain.Controller
-	Live        []SensorLiveReading
-	LiveOne     *SensorLiveReading
-	StaleAfter  time.Duration
-	MqttReady   bool
-	ManualText  string
+	Title               string
+	Path                string
+	Error               string
+	Success             string
+	Sites               []domain.Site
+	Site                *domain.Site
+	Sensors             []domain.Sensor
+	Sensor              *domain.Sensor
+	Controllers         []domain.Controller
+	Controller          *domain.Controller
+	Live                []SensorLiveReading
+	LiveOne             *SensorLiveReading
+	StaleAfter          time.Duration
+	MqttReady           bool
+	ManualText          string
+	RuntimeTickInterval string
 }
 
 func NewServer(configPath string) (*Server, error) {
@@ -241,6 +242,8 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.handleControllerDelete(w, r, parts[1], parts[3])
 	case path == "live" && r.Method == http.MethodGet:
 		s.handleLivePage(w, r)
+	case path == "settings/tick-interval" && r.Method == http.MethodPost:
+		s.handleTickIntervalUpdate(w, r)
 	case len(parts) == 3 && parts[0] == "live" && parts[1] == "sensors" && r.Method == http.MethodGet:
 		s.handleLiveSensorPage(w, r, parts[2])
 	case len(parts) == 4 && parts[0] == "live" && parts[1] == "sensors" && parts[3] == "test" && r.Method == http.MethodPost:
@@ -517,7 +520,59 @@ func (s *Server) handleLivePage(w http.ResponseWriter, r *http.Request) {
 	readings := s.hub.Readings()
 	sort.Slice(readings, func(i, j int) bool { return readings[i].SensorID < readings[j].SensorID })
 
-	s.render(w, "live", viewData{Title: "Live Sensors", Path: strings.Trim(r.URL.Path, "/"), Live: markStale(readings, s.staleAfter), StaleAfter: s.staleAfter, MqttReady: s.mqttReady})
+	interval, err := s.runtimeTickInterval()
+	if err != nil {
+		s.render(w, "live", viewData{Title: "Live Sensors", Path: strings.Trim(r.URL.Path, "/"), Live: markStale(readings, s.staleAfter), StaleAfter: s.staleAfter, Error: err.Error(), MqttReady: s.mqttReady})
+		return
+	}
+
+	success := ""
+	if r.URL.Query().Get("saved") == "1" {
+		success = "Tick / publish interval updated"
+	}
+
+	s.render(w, "live", viewData{Title: "Live Sensors", Path: strings.Trim(r.URL.Path, "/"), Live: markStale(readings, s.staleAfter), StaleAfter: s.staleAfter, RuntimeTickInterval: interval.String(), Success: success, MqttReady: s.mqttReady})
+}
+
+func (s *Server) handleTickIntervalUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	interval, err := time.ParseDuration(strings.TrimSpace(r.FormValue("tick_interval")))
+	if err != nil || interval <= 0 {
+		readings := s.hub.Readings()
+		sort.Slice(readings, func(i, j int) bool { return readings[i].SensorID < readings[j].SensorID })
+		s.render(w, "live", viewData{Title: "Live Sensors", Path: "live", Live: markStale(readings, s.staleAfter), StaleAfter: s.staleAfter, RuntimeTickInterval: r.FormValue("tick_interval"), Error: "tick interval must be a positive duration such as 500ms, 1s, or 5s", MqttReady: s.mqttReady})
+		return
+	}
+
+	if err := s.repo.SetRuntimeDuration(sqlite.RuntimeSettingTickInterval, interval); err != nil {
+		readings := s.hub.Readings()
+		sort.Slice(readings, func(i, j int) bool { return readings[i].SensorID < readings[j].SensorID })
+		s.render(w, "live", viewData{Title: "Live Sensors", Path: "live", Live: markStale(readings, s.staleAfter), StaleAfter: s.staleAfter, RuntimeTickInterval: interval.String(), Error: err.Error(), MqttReady: s.mqttReady})
+		return
+	}
+
+	http.Redirect(w, r, "/live?saved=1", http.StatusSeeOther)
+}
+
+func (s *Server) runtimeTickInterval() (time.Duration, error) {
+	interval := s.cfg.TickInterval
+	if s.repo != nil {
+		configured, ok, err := s.repo.GetRuntimeDuration(sqlite.RuntimeSettingTickInterval)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
+			interval = configured
+		}
+	}
+	if interval <= 0 {
+		return 0, fmt.Errorf("tick interval must be positive")
+	}
+	return interval, nil
 }
 
 func (s *Server) handleLiveSensorPage(w http.ResponseWriter, r *http.Request, sensorID string) {

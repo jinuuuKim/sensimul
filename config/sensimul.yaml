@@ -1,6 +1,6 @@
 mode: dev
 seed: 42
-tick_interval: 1s
+tick_interval: 5s
 site_id: ""
 
 sqlite:

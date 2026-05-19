@@ -3,6 +3,12 @@
 <div class="card">
   <h2>Live Sensor Overview</h2>
   <p class="muted">Stale threshold: {{.StaleAfter}}</p>
+  <form method="post" action="/settings/tick-interval" class="row">
+    <label>Tick / publish interval
+      <input name="tick_interval" value="{{.RuntimeTickInterval}}" required />
+    </label>
+    <button type="submit">Save Interval</button>
+  </form>
   <table id="live-table">
     <thead><tr><th>Sensor</th><th>Type</th><th>Value</th><th>Status</th><th>Updated</th></tr></thead>
     <tbody>

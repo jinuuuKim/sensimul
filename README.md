@@ -140,7 +140,7 @@ make fmt            # 코드 포맷팅
 ```yaml
 mode: dev                    # 실행 모드: dev, test, prodlike
 seed: 42                     # 랜덤 시드 (재현 가능한 결과)
-tick_interval: 1s            # 시뮬레이션 틱 간격
+tick_interval: 5s            # 시뮬레이션 틱/센서 송신 기본 간격 (웹 Live 화면에서도 변경할 수 있습니다)
 site_id: ""                  # 특정 사이트만 실행 (빈값=전체)
 
 sqlite:
@@ -411,7 +411,7 @@ sensimul/sites/{site_id}/test/result    # 테스트 결과
 | `SENSIMUL_MQTT_QOS` | MQTT QoS 레벨 | 1 |
 | `SENSIMUL_MODE` | 실행 모드 | dev |
 | `SENSIMUL_SQLITE_PATH` | SQLite DB 경로 | data/sensimul.db |
-| `SENSIMUL_TICK_INTERVAL` | 시뮬레이션 간격 | 1s |
+| `SENSIMUL_TICK_INTERVAL` | 시뮬레이션 간격 | 5s |
 | `SENSIMUL_WEB_LISTEN_ADDR` | 웹 서버 주소 | :8080 |
 | `SENSIMUL_LOGGING_LEVEL` | 로그 레벨 | info |
 | `SENSIMUL_LOGGING_FORMAT` | 로그 포맷 | json |

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/sensimul/sensimul/internal/domain"
 	_ "modernc.org/sqlite"
@@ -43,7 +44,14 @@ CREATE TABLE IF NOT EXISTS controllers (
     output_level INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS runtime_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 `
+
+const RuntimeSettingTickInterval = "tick_interval"
 
 type Repository struct {
 	db *sql.DB
@@ -83,6 +91,44 @@ func (r *Repository) Close() error {
 
 func (r *Repository) DB() *sql.DB {
 	return r.db
+}
+
+func (r *Repository) GetRuntimeDuration(key string) (time.Duration, bool, error) {
+	row := r.db.QueryRow(`SELECT value FROM runtime_settings WHERE key = ?`, key)
+
+	var raw string
+	if err := row.Scan(&raw); err != nil {
+		if err == sql.ErrNoRows {
+			return 0, false, nil
+		}
+		return 0, false, fmt.Errorf("query runtime setting %s: %w", key, err)
+	}
+
+	duration, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, true, fmt.Errorf("parse runtime setting %s: %w", key, err)
+	}
+	return duration, true, nil
+}
+
+func (r *Repository) SetRuntimeDuration(key string, duration time.Duration) error {
+	if key == "" {
+		return fmt.Errorf("runtime setting key cannot be empty")
+	}
+	if duration <= 0 {
+		return fmt.Errorf("runtime setting %s must be positive", key)
+	}
+
+	_, err := r.db.Exec(
+		`INSERT INTO runtime_settings (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		key,
+		duration.String(),
+	)
+	if err != nil {
+		return fmt.Errorf("upsert runtime setting %s: %w", key, err)
+	}
+	return nil
 }
 
 func (r *Repository) CreateSite(site *domain.Site) error {
