@@ -4,6 +4,17 @@ services:
     container_name: sensimul-mqtt
     ports:
       - "1883:1883"
+      - "9001:9001"
+    environment:
+      MQTT_WS_USERNAME: ${MQTT_WS_USERNAME:?set MQTT_WS_USERNAME in .env}
+      MQTT_WS_PASSWORD: ${MQTT_WS_PASSWORD:?set MQTT_WS_PASSWORD in .env}
+    volumes:
+      - ./config/mosquitto:/mosquitto/config
+    command: >
+      sh -c "mosquitto_passwd -b -c /mosquitto/config/passwords \"$$MQTT_WS_USERNAME\" \"$$MQTT_WS_PASSWORD\" &&
+      chown 1883:1883 /mosquitto/config/passwords &&
+      chmod 0640 /mosquitto/config/passwords &&
+      exec mosquitto -c /mosquitto/config/mosquitto.conf"
 
   sensimul:
     build:

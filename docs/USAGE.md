@@ -66,12 +66,29 @@ sensimul/sites/{site_id}/sensors/{sensor_id}
 ### MQTT only
 
 ```bash
+cp .env.example .env
+# Set MQTT_WS_USERNAME and MQTT_WS_PASSWORD in .env before starting.
 docker compose -f docker-compose.mqtt.yml up -d
+```
+
+The MQTT broker exposes:
+
+| Protocol | Port | Authentication |
+|---|---:|---|
+| MQTT TCP | `1883` | anonymous, for local simulator/web services |
+| MQTT over WebSocket | `9001` | username/password from `.env` |
+
+MQTT over WebSocket clients can subscribe to live telemetry with:
+
+```text
+sensimul/sites/{site_id}/sensors/+
 ```
 
 ### Full stack (MQTT + SenSimul)
 
 ```bash
+cp .env.example .env
+# Set MQTT_WS_USERNAME and MQTT_WS_PASSWORD in .env before starting.
 docker compose up -d --build
 docker compose logs -f
 ```

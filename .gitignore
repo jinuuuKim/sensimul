@@ -36,6 +36,7 @@ env/
 data/*.db
 data/*.sqlite
 config/sites/*.json
+config/mosquitto/passwords
 
 # Logs
 *.log
