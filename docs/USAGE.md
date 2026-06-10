@@ -139,11 +139,13 @@ PM is modelled with the same ambient-relaxation engine as temperature/humidity.
   equilibrium (the KMA reading already embeds wind), so the effect is a subtle
   transient, not a large swing.
 
-> **PM10 verification status (pending).** Unlike the ASOS endpoint, the
-> `kma_pm10.php` column layout has **not** been verified against a live response,
-> so `pm_mode` defaults to **off**. `weather.pm_column` (default 2) is the 0-based
-> PM10 column index — call `kma_pm10.php?tm1=YYYYMMDDHH00&tm2=YYYYMMDDHH00&stn=108&help=1`,
-> confirm the column, adjust `pm_column` if needed, then set `pm_mode: kma`.
+> **PM10 verification status.** The `kma_pm10.php` column layout is confirmed
+> against the live `help=1` header — `TM STN_ID PM10 FLAG MQC`, so PM10 is at
+> index 2 (`pm_column` default). The endpoint takes a single time as `tm2`. To
+> enable, set both `mode: kma` and `pm_mode: kma`. `pm_mode` defaults to **off**
+> so the standard synthetic config loads without a key. One thing still to
+> confirm live: that PM10 station `108` returns a populated row (if not, the
+> sim falls back to simulated PM — no error).
 
 ## 4) Docker Run
 

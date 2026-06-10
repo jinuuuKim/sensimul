@@ -41,11 +41,11 @@ type WeatherConfig struct {
 	Timeout time.Duration `mapstructure:"timeout"`  // HTTP request timeout (mode=kma)
 
 	// PM10 황사 source (opt-in). off | kma. PM2.5 is not provided by KMA 황사
-	// and stays simulated. Off by default; enable after verifying the response
-	// layout against a live kma_pm10.php call.
+	// and stays simulated. Off by default; set pm_mode=kma (with mode=kma) to use
+	// it. Column layout confirmed: TM STN PM10 FLAG MQC → PM10 at index 2.
 	PMMode    string `mapstructure:"pm_mode"`     // off | kma
 	PMBaseURL string `mapstructure:"pm_base_url"` // KMA 황사 PM10 endpoint
-	PMColumn  int    `mapstructure:"pm_column"`   // 0-based PM10 column index in the data row
+	PMColumn  int    `mapstructure:"pm_column"`   // 0-based PM10 column index (default 2, verified)
 }
 
 type LoggingConfig struct {

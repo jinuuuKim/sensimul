@@ -84,9 +84,9 @@ func (c *Client) fetchKMA() (*Weather, error) {
 }
 
 // fetchPM10 pulls the latest 황사 PM10 observation (kma_pm10.php) for the
-// configured station. This endpoint is the tm1/tm2 range variant, so we request
-// a single hour (tm1 == tm2). The PM10 column index is configurable because the
-// exact dust-observation layout must be verified against a live response.
+// configured station. This endpoint takes a single time as tm2 (per the API's
+// example ?tm2=...&stn=0). Column layout confirmed against the live help=1
+// header: TM STN_ID PM10 FLAG MQC → PM10 at index 2 (pm_column default).
 func (c *Client) fetchPM10() (float64, error) {
 	tm := latestObservationHourKST(c.now())
 
@@ -95,7 +95,6 @@ func (c *Client) fetchPM10() (float64, error) {
 		return 0, fmt.Errorf("invalid pm base url: %w", err)
 	}
 	q := endpoint.Query()
-	q.Set("tm1", tm)
 	q.Set("tm2", tm)
 	q.Set("stn", c.Station)
 	q.Set("help", "0")

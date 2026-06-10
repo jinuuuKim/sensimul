@@ -77,13 +77,11 @@ func TestParseKMASfctmNoDataRow(t *testing.T) {
 	}
 }
 
-// NOTE: the kma_pm10.php layout is not yet verified against a live response;
-// pmColumn is configurable for exactly that reason. This fixture pins the
-// parser's mechanics (skip headers, pick column, reject sentinels), not the
-// real column index.
+// kma_pm10.php column layout confirmed against the live help=1 header:
+// TM STN_ID PM10 FLAG MQC → PM10 at index 2 (pm_column default).
 const pm10Body = `#START7777
-# TM           STN  PM10
- 202606100900  108  47
+#         TM    STN  PM10   FLAG MQC
+ 202606100900   108    47      0   1
 #7777END`
 
 func TestParsePM10(t *testing.T) {
@@ -97,14 +95,14 @@ func TestParsePM10(t *testing.T) {
 }
 
 func TestParsePM10MissingRejected(t *testing.T) {
-	body := ` 202606100900 108 -9.0`
+	body := ` 202606100900 108 -9.0 0 1`
 	if _, err := parsePM10(body, 2); err == nil {
 		t.Fatal("expected error for -9.0 sentinel PM10")
 	}
 }
 
 func TestParsePM10ColumnOutOfRange(t *testing.T) {
-	if _, err := parsePM10(` 202606100900 108 47`, 9); err == nil {
+	if _, err := parsePM10(` 202606100900 108 47 0 1`, 9); err == nil {
 		t.Fatal("expected error when column index exceeds row width")
 	}
 }

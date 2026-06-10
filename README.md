@@ -161,7 +161,7 @@ weather:
   timeout: 10s               # KMA HTTP 요청 타임아웃
   pm_mode: off               # off | kma (황사 PM10 소스, 기본 off)
   pm_base_url: https://apihub.kma.go.kr/api/typ01/url/kma_pm10.php  # 황사 PM10
-  pm_column: 2               # PM10 컬럼(0-base); 라이브 응답 검증 후 조정
+  pm_column: 2               # PM10 컬럼(0-base); 검증됨: TM STN PM10 FLAG MQC
 
 logging:
   level: info                # 로그 레벨: debug, info, warn, error
