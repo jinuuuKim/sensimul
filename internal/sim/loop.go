@@ -343,7 +343,7 @@ func (l *Loop) shouldRefreshWeather() bool {
 // failed but a fallback (last-good cache / synthetic) was applied, which we log
 // without discarding the value.
 func (l *Loop) refreshWeather() error {
-	w, err := l.weatherSvc.Get()
+	w, err := l.weatherSvc.GetForStation(l.state.Site.WeatherStation)
 	if w == nil {
 		return err
 	}

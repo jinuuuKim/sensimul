@@ -58,6 +58,35 @@ func TestKMAFetchAndCache(t *testing.T) {
 	}
 }
 
+func TestKMAFetchCachesByStation(t *testing.T) {
+	hits := make(map[string]int)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		station := r.URL.Query().Get("stn")
+		hits[station]++
+		_, _ = w.Write([]byte(representativeBody))
+	}))
+	defer srv.Close()
+
+	c := NewClient(ModeKMA, "secret", srv.URL, "108", time.Minute, time.Second)
+
+	if _, err := c.GetForStation("108"); err != nil {
+		t.Fatalf("get 108: %v", err)
+	}
+	if _, err := c.GetForStation("159"); err != nil {
+		t.Fatalf("get 159: %v", err)
+	}
+	if _, err := c.GetForStation("108"); err != nil {
+		t.Fatalf("get cached 108: %v", err)
+	}
+
+	if hits["108"] != 1 {
+		t.Fatalf("station 108 hits = %d, want 1", hits["108"])
+	}
+	if hits["159"] != 1 {
+		t.Fatalf("station 159 hits = %d, want 1", hits["159"])
+	}
+}
+
 func TestKMAFailureRetainsLastGood(t *testing.T) {
 	var fail bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

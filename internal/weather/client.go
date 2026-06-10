@@ -3,6 +3,7 @@ package weather
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -52,8 +53,12 @@ type Client struct {
 	pmBaseURL string
 	pmColumn  int
 
-	mu          sync.RWMutex
-	cache       *Weather
+	mu       sync.RWMutex
+	stations map[string]*stationCache
+}
+
+type stationCache struct {
+	weather     *Weather
 	cacheTime   time.Time
 	lastPM10    float64
 	hasLastPM10 bool
@@ -81,6 +86,7 @@ func NewClient(mode, apiKey, baseURL, station string, ttl, timeout time.Duration
 		Timeout:    timeout,
 		httpClient: &http.Client{Timeout: timeout},
 		now:        time.Now,
+		stations:   make(map[string]*stationCache),
 	}
 }
 
@@ -89,23 +95,37 @@ func NewClient(mode, apiKey, baseURL, station string, ttl, timeout time.Duration
 // (last-good cache, or synthetic) is still returned so the caller can log the
 // failure while continuing the simulation without a discontinuity.
 func (c *Client) Get() (*Weather, error) {
+	return c.GetForStation(c.Station)
+}
+
+// GetForStation returns weather evidence for a specific KMA ASOS station. It
+// keeps station-specific caches so multiple sites can use distinct weather
+// sources while MQTT routing stays based on site_id.
+func (c *Client) GetForStation(station string) (*Weather, error) {
+	station = c.effectiveStation(station)
+
 	// Serve a fresh cache without touching the network.
 	c.mu.RLock()
-	if c.cache != nil && c.now().Sub(c.cacheTime) < c.TTL {
-		w := *c.cache
+	entry := c.stations[station]
+	if entry != nil && entry.weather != nil && c.now().Sub(entry.cacheTime) < c.TTL {
+		w := *entry.weather
 		w.Source = SourceCache
 		c.mu.RUnlock()
 		return &w, nil
 	}
-	lastGood := c.cache // may be nil; copy pointer under lock
+	var lastGood *Weather
+	if entry != nil && entry.weather != nil {
+		copy := *entry.weather
+		lastGood = &copy
+	}
 	c.mu.RUnlock()
 
 	if c.Mode != ModeKMA {
-		return c.synthetic(), nil
+		return c.synthetic(station), nil
 	}
 
 	// Network I/O happens WITHOUT holding the mutex.
-	w, err := c.fetchKMA()
+	w, err := c.fetchKMA(station)
 	if err != nil {
 		// 주기적 조정 의미를 지키기 위해, 실패 시 마지막 정상값을 유지한다.
 		if lastGood != nil {
@@ -114,25 +134,36 @@ func (c *Client) Get() (*Weather, error) {
 			return &lg, err
 		}
 		// 한 번도 성공한 적이 없으면 합성 기준값으로 시작한다.
-		return c.synthetic(), err
+		return c.synthetic(station), err
 	}
 
-	c.enrichPM(w)
-	c.setCache(w)
+	c.enrichPM(w, station)
+	c.setCache(station, w)
 	return w, nil
+}
+
+func (c *Client) effectiveStation(station string) string {
+	if trimmed := strings.TrimSpace(station); trimmed != "" {
+		return trimmed
+	}
+	return strings.TrimSpace(c.Station)
 }
 
 // enrichPM best-effort attaches KMA 황사 PM10 to the weather. A PM failure never
 // fails the primary fetch; the last-good PM10 is carried forward instead.
-func (c *Client) enrichPM(w *Weather) {
+func (c *Client) enrichPM(w *Weather, station string) {
 	if c.pmMode != ModeKMA {
 		return
 	}
 
-	pm10, err := c.fetchPM10()
+	pm10, err := c.fetchPM10(station)
 	if err != nil {
 		c.mu.RLock()
-		lg, ok := c.lastPM10, c.hasLastPM10
+		entry := c.stations[station]
+		lg, ok := 0.0, false
+		if entry != nil {
+			lg, ok = entry.lastPM10, entry.hasLastPM10
+		}
 		c.mu.RUnlock()
 		if ok {
 			w.PM10UgM3 = lg
@@ -145,12 +176,13 @@ func (c *Client) enrichPM(w *Weather) {
 	w.HasPM10 = true
 
 	c.mu.Lock()
-	c.lastPM10 = pm10
-	c.hasLastPM10 = true
+	entry := c.ensureStationLocked(station)
+	entry.lastPM10 = pm10
+	entry.hasLastPM10 = true
 	c.mu.Unlock()
 }
 
-func (c *Client) synthetic() *Weather {
+func (c *Client) synthetic(station string) *Weather {
 	w := &Weather{
 		TemperatureC: 20.0,
 		HumidityPct:  60.0,
@@ -160,21 +192,31 @@ func (c *Client) synthetic() *Weather {
 		Source:       SourceSynthetic,
 	}
 	// setCache stores an independent copy, so returning w is safe.
-	c.setCache(w)
+	c.setCache(station, w)
 	return w
 }
 
-func (c *Client) setCache(w *Weather) {
+func (c *Client) setCache(station string, w *Weather) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	stored := *w
-	c.cache = &stored
-	c.cacheTime = c.now()
+	entry := c.ensureStationLocked(station)
+	entry.weather = &stored
+	entry.cacheTime = c.now()
+}
+
+func (c *Client) ensureStationLocked(station string) *stationCache {
+	entry := c.stations[station]
+	if entry == nil {
+		entry = &stationCache{}
+		c.stations[station] = entry
+	}
+	return entry
 }
 
 // SetCache is retained for callers/tests that want to prime the cache directly.
 func (c *Client) SetCache(w *Weather) {
-	c.setCache(w)
+	c.setCache(c.effectiveStation(c.Station), w)
 }
 
 func (c *Client) Validate() error {
@@ -184,9 +226,6 @@ func (c *Client) Validate() error {
 	if c.Mode == ModeKMA {
 		if c.APIKey == "" {
 			return fmt.Errorf("weather api key is required for kma mode")
-		}
-		if c.Station == "" {
-			return fmt.Errorf("weather station is required for kma mode")
 		}
 		if c.BaseURL == "" {
 			return fmt.Errorf("weather base url is required for kma mode")

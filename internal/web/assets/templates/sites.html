@@ -10,13 +10,14 @@
     <input name="longitude" placeholder="longitude" value="126.9780" />
     <input name="timezone" placeholder="timezone" value="UTC" />
     <input name="elevation" placeholder="elevation" value="0" />
+    <input name="weather_station" placeholder="KMA station" value="108" />
     <button type="submit">Add Site</button>
   </form>
 </div>
 
 <div class="card">
   <table>
-    <thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Location</th><th>Action</th></tr></thead>
+    <thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Location</th><th>KMA</th><th>Action</th></tr></thead>
     <tbody>
     {{range .Sites}}
       <tr>
@@ -24,6 +25,7 @@
         <td>{{.Name}}</td>
         <td>{{.Type}}</td>
         <td>{{.Latitude}}, {{.Longitude}}</td>
+        <td>{{.WeatherStation}}</td>
         <td>
           <a href="/sites/{{.ID}}/edit">edit</a> |
           <a href="/sites/{{.ID}}/sensors">sensors</a> |
@@ -34,7 +36,7 @@
         </td>
       </tr>
     {{else}}
-      <tr><td colspan="5">No sites configured.</td></tr>
+      <tr><td colspan="6">No sites configured.</td></tr>
     {{end}}
     </tbody>
   </table>

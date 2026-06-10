@@ -282,6 +282,7 @@ func (s *Server) handleSiteCreate(w http.ResponseWriter, r *http.Request) {
 	site.Timezone = valueOrDefault(r.FormValue("timezone"), "UTC")
 	elevation, _ := strconv.ParseFloat(r.FormValue("elevation"), 64)
 	site.Elevation = elevation
+	site.WeatherStation = r.FormValue("weather_station")
 
 	if err := s.repo.CreateSite(site); err != nil {
 		sites, _ := s.repo.ListSites()
@@ -324,6 +325,7 @@ func (s *Server) handleSiteUpdate(w http.ResponseWriter, r *http.Request, siteID
 	updated.Longitude = lon
 	updated.Timezone = valueOrDefault(r.FormValue("timezone"), "UTC")
 	updated.Elevation = elevation
+	updated.WeatherStation = r.FormValue("weather_station")
 
 	if current.Type != updated.Type {
 		ctrls, listErr := s.repo.ListControllers(siteID)

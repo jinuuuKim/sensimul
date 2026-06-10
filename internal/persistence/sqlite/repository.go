@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sensimul/sensimul/internal/domain"
@@ -19,7 +20,8 @@ CREATE TABLE IF NOT EXISTS sites (
     latitude REAL NOT NULL,
     longitude REAL NOT NULL,
     timezone TEXT NOT NULL,
-    elevation REAL NOT NULL
+    elevation REAL NOT NULL,
+    weather_station TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS sensors (
@@ -81,8 +83,21 @@ func New(dbPath string) (*Repository, error) {
 }
 
 func (r *Repository) initSchema() error {
-	_, err := r.db.Exec(schemaSQL)
-	return err
+	if _, err := r.db.Exec(schemaSQL); err != nil {
+		return err
+	}
+	return r.migrateSchema()
+}
+
+func (r *Repository) migrateSchema() error {
+	if _, err := r.db.Exec(`ALTER TABLE sites ADD COLUMN weather_station TEXT NOT NULL DEFAULT ''`); err != nil {
+		// SQLite reports "duplicate column name" after the first migration. Keep
+		// this lightweight so older DietPi databases can be upgraded in place.
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("migrate sites.weather_station: %w", err)
+		}
+	}
+	return nil
 }
 
 func (r *Repository) Close() error {
@@ -137,8 +152,8 @@ func (r *Repository) CreateSite(site *domain.Site) error {
 	}
 
 	_, err := r.db.Exec(
-		`INSERT INTO sites (id, name, type, latitude, longitude, timezone, elevation) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		site.ID, site.Name, string(site.Type), site.Latitude, site.Longitude, site.Timezone, site.Elevation,
+		`INSERT INTO sites (id, name, type, latitude, longitude, timezone, elevation, weather_station) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		site.ID, site.Name, string(site.Type), site.Latitude, site.Longitude, site.Timezone, site.Elevation, site.WeatherStation,
 	)
 	if err != nil {
 		return fmt.Errorf("insert site: %w", err)
@@ -147,11 +162,11 @@ func (r *Repository) CreateSite(site *domain.Site) error {
 }
 
 func (r *Repository) GetSite(id string) (*domain.Site, error) {
-	row := r.db.QueryRow(`SELECT id, name, type, latitude, longitude, timezone, elevation FROM sites WHERE id = ?`, id)
+	row := r.db.QueryRow(`SELECT id, name, type, latitude, longitude, timezone, elevation, weather_station FROM sites WHERE id = ?`, id)
 
 	var site domain.Site
 	var siteType string
-	if err := row.Scan(&site.ID, &site.Name, &siteType, &site.Latitude, &site.Longitude, &site.Timezone, &site.Elevation); err != nil {
+	if err := row.Scan(&site.ID, &site.Name, &siteType, &site.Latitude, &site.Longitude, &site.Timezone, &site.Elevation, &site.WeatherStation); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -164,7 +179,7 @@ func (r *Repository) GetSite(id string) (*domain.Site, error) {
 }
 
 func (r *Repository) ListSites() ([]domain.Site, error) {
-	rows, err := r.db.Query(`SELECT id, name, type, latitude, longitude, timezone, elevation FROM sites ORDER BY id`)
+	rows, err := r.db.Query(`SELECT id, name, type, latitude, longitude, timezone, elevation, weather_station FROM sites ORDER BY id`)
 	if err != nil {
 		return nil, fmt.Errorf("list sites: %w", err)
 	}
@@ -174,7 +189,7 @@ func (r *Repository) ListSites() ([]domain.Site, error) {
 	for rows.Next() {
 		var site domain.Site
 		var siteType string
-		if err := rows.Scan(&site.ID, &site.Name, &siteType, &site.Latitude, &site.Longitude, &site.Timezone, &site.Elevation); err != nil {
+		if err := rows.Scan(&site.ID, &site.Name, &siteType, &site.Latitude, &site.Longitude, &site.Timezone, &site.Elevation, &site.WeatherStation); err != nil {
 			return nil, fmt.Errorf("scan site: %w", err)
 		}
 		site.Type = domain.SiteType(siteType)
@@ -195,13 +210,14 @@ func (r *Repository) UpdateSite(site *domain.Site) error {
 	}
 
 	res, err := r.db.Exec(
-		`UPDATE sites SET name = ?, type = ?, latitude = ?, longitude = ?, timezone = ?, elevation = ? WHERE id = ?`,
+		`UPDATE sites SET name = ?, type = ?, latitude = ?, longitude = ?, timezone = ?, elevation = ?, weather_station = ? WHERE id = ?`,
 		site.Name,
 		string(site.Type),
 		site.Latitude,
 		site.Longitude,
 		site.Timezone,
 		site.Elevation,
+		site.WeatherStation,
 		site.ID,
 	)
 	if err != nil {

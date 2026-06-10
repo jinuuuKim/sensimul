@@ -39,7 +39,7 @@ const (
 
 // fetchKMA pulls the latest completed-hour observation for the configured
 // station and parses it into a Weather evidence value.
-func (c *Client) fetchKMA() (*Weather, error) {
+func (c *Client) fetchKMA(station string) (*Weather, error) {
 	tm := latestObservationHourKST(c.now())
 
 	endpoint, err := url.Parse(c.BaseURL)
@@ -48,7 +48,7 @@ func (c *Client) fetchKMA() (*Weather, error) {
 	}
 	q := endpoint.Query()
 	q.Set("tm", tm)
-	q.Set("stn", c.Station)
+	q.Set("stn", station)
 	q.Set("help", "0")
 	q.Set("authKey", c.APIKey)
 	endpoint.RawQuery = q.Encode()
@@ -87,7 +87,7 @@ func (c *Client) fetchKMA() (*Weather, error) {
 // configured station. This endpoint takes a single time as tm2 (per the API's
 // example ?tm2=...&stn=0). Column layout confirmed against the live help=1
 // header: TM STN_ID PM10 FLAG MQC → PM10 at index 2 (pm_column default).
-func (c *Client) fetchPM10() (float64, error) {
+func (c *Client) fetchPM10(station string) (float64, error) {
 	tm := latestObservationHourKST(c.now())
 
 	endpoint, err := url.Parse(c.pmBaseURL)
@@ -96,7 +96,7 @@ func (c *Client) fetchPM10() (float64, error) {
 	}
 	q := endpoint.Query()
 	q.Set("tm2", tm)
-	q.Set("stn", c.Station)
+	q.Set("stn", station)
 	q.Set("help", "0")
 	q.Set("authKey", c.APIKey)
 	endpoint.RawQuery = q.Encode()

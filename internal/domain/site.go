@@ -25,15 +25,18 @@ type StateChannels struct {
 }
 
 type Site struct {
-	ID        string           `json:"id"`
-	Name      string           `json:"name"`
-	Type      SiteType         `json:"type"`
-	Latitude  float64          `json:"latitude"`
-	Longitude float64          `json:"longitude"`
-	Timezone  string           `json:"timezone"`
-	Elevation float64          `json:"elevation"`
-	Env       EnvironmentState `json:"environment_state"`
-	Channels  StateChannels    `json:"state_channels"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Type      SiteType `json:"type"`
+	Latitude  float64  `json:"latitude"`
+	Longitude float64  `json:"longitude"`
+	Timezone  string   `json:"timezone"`
+	Elevation float64  `json:"elevation"`
+	// WeatherStation is a KMA ASOS station code used only for weather evidence
+	// lookup. MQTT topics and payload routing continue to use Site.ID.
+	WeatherStation string           `json:"weather_station"`
+	Env            EnvironmentState `json:"environment_state"`
+	Channels       StateChannels    `json:"state_channels"`
 }
 
 func NewSite(id, name string, siteType SiteType, lat, lon float64) *Site {

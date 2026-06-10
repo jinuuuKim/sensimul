@@ -16,13 +16,22 @@ func TestRepositoryCRUD(t *testing.T) {
 	t.Cleanup(func() { _ = repo.Close() })
 
 	site := domain.NewSite("S1", "Site1", domain.SiteTypeIndoor, 37.5, 126.9)
+	site.WeatherStation = "108"
 	if err := repo.CreateSite(site); err != nil {
 		t.Fatalf("create site: %v", err)
 	}
 
 	site.Name = "Site1-updated"
+	site.WeatherStation = "159"
 	if err := repo.UpdateSite(site); err != nil {
 		t.Fatalf("update site: %v", err)
+	}
+	gotSite, err := repo.GetSite(site.ID)
+	if err != nil {
+		t.Fatalf("get site: %v", err)
+	}
+	if gotSite.WeatherStation != "159" {
+		t.Fatalf("weather station = %q, want 159", gotSite.WeatherStation)
 	}
 
 	sensor, err := domain.NewSensor("TEMP1", site.ID, "temperature")
