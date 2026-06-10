@@ -45,3 +45,49 @@ logs/
 # Environment
 .env
 .env.local
+# ---- Public mirror hygiene (added 2026-06-10) ----
+# Local OS and IDE files
+.DS_Store
+.idea/
+.vscode/
+*.code-workspace
+.settings/
+.classpath
+.project
+.factorypath
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+secrets/
+
+# AI agent and local assistant files
+.agents/
+.codex/
+.claude/
+.cursor/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.cursorrules
+
+# Terraform and generated state
+.terraform/
+terraform.tfstate
+terraform.tfstate.*
+*.tfvars
+*.tfvars.json
+
+# Logs and generated outputs
+*.log
+logs/
+target/
+dist/
+build/
+coverage/
+node_modules/
