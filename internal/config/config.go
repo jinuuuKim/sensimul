@@ -33,9 +33,19 @@ type MQTTConfig struct {
 }
 
 type WeatherConfig struct {
-	Mode   string        `mapstructure:"mode"`
-	APIKey string        `mapstructure:"api_key"`
-	TTL    time.Duration `mapstructure:"ttl"`
+	Mode    string        `mapstructure:"mode"`     // synthetic | kma
+	APIKey  string        `mapstructure:"api_key"`  // KMA API Hub authKey (mode=kma)
+	BaseURL string        `mapstructure:"base_url"` // KMA ASOS hourly endpoint
+	Station string        `mapstructure:"station"`  // ASOS station number (지점번호), default 108(서울)
+	TTL     time.Duration `mapstructure:"ttl"`      // refresh/cache cycle; KMA ASOS is hourly
+	Timeout time.Duration `mapstructure:"timeout"`  // HTTP request timeout (mode=kma)
+
+	// PM10 황사 source (opt-in). off | kma. PM2.5 is not provided by KMA 황사
+	// and stays simulated. Off by default; set pm_mode=kma (with mode=kma) to use
+	// it. Column layout confirmed: TM STN PM10 FLAG MQC → PM10 at index 2.
+	PMMode    string `mapstructure:"pm_mode"`     // off | kma
+	PMBaseURL string `mapstructure:"pm_base_url"` // KMA 황사 PM10 endpoint
+	PMColumn  int    `mapstructure:"pm_column"`   // 0-based PM10 column index (default 2, verified)
 }
 
 type LoggingConfig struct {
@@ -63,8 +73,14 @@ var defaultConfig = Config{
 		Retain:    false,
 	},
 	Weather: WeatherConfig{
-		Mode: "synthetic",
-		TTL:  300 * time.Second,
+		Mode:      "synthetic",
+		BaseURL:   "https://apihub.kma.go.kr/api/typ01/url/kma_sfctm2.php",
+		Station:   "108",
+		TTL:       3600 * time.Second, // KMA ASOS 시간자료는 매시간 갱신 → 1시간 주기
+		Timeout:   10 * time.Second,
+		PMMode:    "off",
+		PMBaseURL: "https://apihub.kma.go.kr/api/typ01/url/kma_pm10.php",
+		PMColumn:  2,
 	},
 	Logging: LoggingConfig{
 		Level:  "info",
@@ -118,8 +134,36 @@ func validate(c *Config) error {
 	if c.TickInterval <= 0 {
 		return fmt.Errorf("tick_interval must be positive")
 	}
-	if c.Weather.Mode != "synthetic" && c.Weather.Mode != "openweathermap" {
-		return fmt.Errorf("invalid weather mode: %s", c.Weather.Mode)
+	if c.Weather.Mode != "synthetic" && c.Weather.Mode != "kma" {
+		return fmt.Errorf("invalid weather mode: %s (must be synthetic|kma)", c.Weather.Mode)
+	}
+	if c.Weather.Mode == "kma" {
+		if c.Weather.APIKey == "" {
+			return fmt.Errorf("weather.api_key is required when weather.mode is kma")
+		}
+		if c.Weather.Station == "" {
+			return fmt.Errorf("weather.station is required when weather.mode is kma")
+		}
+		if c.Weather.BaseURL == "" {
+			return fmt.Errorf("weather.base_url is required when weather.mode is kma")
+		}
+		if c.Weather.Timeout <= 0 {
+			return fmt.Errorf("weather.timeout must be positive when weather.mode is kma")
+		}
+	}
+	if c.Weather.PMMode != "off" && c.Weather.PMMode != "kma" {
+		return fmt.Errorf("invalid weather.pm_mode: %s (must be off|kma)", c.Weather.PMMode)
+	}
+	if c.Weather.PMMode == "kma" {
+		if c.Weather.Mode != "kma" {
+			return fmt.Errorf("weather.pm_mode=kma requires weather.mode=kma (shared authKey)")
+		}
+		if c.Weather.PMBaseURL == "" {
+			return fmt.Errorf("weather.pm_base_url is required when weather.pm_mode is kma")
+		}
+		if c.Weather.PMColumn < 0 {
+			return fmt.Errorf("weather.pm_column must be >= 0")
+		}
 	}
 	if c.MQTT.QoS > 2 {
 		return fmt.Errorf("mqtt qos must be 0|1|2")

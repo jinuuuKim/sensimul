@@ -17,6 +17,11 @@ type State struct {
 	Weather *WeatherSnapshot
 	RNG     *Rand
 
+	// Simulated PM baseline captured at init. Used as the outdoor PM reference
+	// when no live evidence is available (PM2.5 always; PM10 until KMA 황사 is on).
+	BaselinePM25 float64
+	BaselinePM10 float64
+
 	TickCount uint64
 	Frozen    bool
 }
@@ -26,6 +31,9 @@ type WeatherSnapshot struct {
 	HumidityPct  float64
 	PressureHPA  float64
 	WindSpeedMPS float64
+	PM25UgM3     float64
+	PM10UgM3     float64
+	HasPM        bool // true when PM10 came from the KMA 황사 source
 	Source       string
 }
 
@@ -40,6 +48,8 @@ func NewState(site *domain.Site, seed int64) *State {
 		HumidityEngine: physics.NewHumidity(site.Env.HumidityPct),
 		Particulate:    physics.NewParticulate(site.Env.PM25UgM3, site.Env.PM10UgM3),
 		RNG:            rng,
+		BaselinePM25:   site.Env.PM25UgM3,
+		BaselinePM10:   site.Env.PM10UgM3,
 		TickCount:      0,
 		Frozen:         false,
 	}

@@ -47,7 +47,17 @@ func New(configPath string) (*App, error) {
 		logging.NewLogger("mqtt"),
 	)
 
-	weatherClient := weather.NewClient(cfg.Weather.Mode, cfg.Weather.APIKey, cfg.Weather.TTL)
+	weatherClient := weather.NewClient(
+		cfg.Weather.Mode,
+		cfg.Weather.APIKey,
+		cfg.Weather.BaseURL,
+		cfg.Weather.Station,
+		cfg.Weather.TTL,
+		cfg.Weather.Timeout,
+	)
+	if cfg.Weather.PMMode == "kma" {
+		weatherClient.ConfigurePM(cfg.Weather.PMBaseURL, cfg.Weather.PMColumn)
+	}
 	if err := weatherClient.Validate(); err != nil {
 		repo.Close()
 		return nil, domain.NewConfigError("invalid weather configuration", err)

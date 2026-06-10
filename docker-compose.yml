@@ -27,6 +27,13 @@ services:
     container_name: sensimul-app
     depends_on:
       - mqtt
+    environment:
+      # Weather/KMA settings injected at deploy time (keep the authKey out of the
+      # repo — set it in .env, which is gitignored). Defaults keep synthetic mode.
+      SENSIMUL_WEATHER_MODE: ${SENSIMUL_WEATHER_MODE:-synthetic}
+      SENSIMUL_WEATHER_API_KEY: ${SENSIMUL_WEATHER_API_KEY:-}
+      SENSIMUL_WEATHER_STATION: ${SENSIMUL_WEATHER_STATION:-108}
+      SENSIMUL_WEATHER_PM_MODE: ${SENSIMUL_WEATHER_PM_MODE:-off}
     volumes:
       - ./data:/app/data
       - ./config/sensimul.yaml:/app/config/sensimul.yaml:ro
@@ -44,6 +51,11 @@ services:
     container_name: sensimul-web
     depends_on:
       - mqtt
+    environment:
+      SENSIMUL_WEATHER_MODE: ${SENSIMUL_WEATHER_MODE:-synthetic}
+      SENSIMUL_WEATHER_API_KEY: ${SENSIMUL_WEATHER_API_KEY:-}
+      SENSIMUL_WEATHER_STATION: ${SENSIMUL_WEATHER_STATION:-108}
+      SENSIMUL_WEATHER_PM_MODE: ${SENSIMUL_WEATHER_PM_MODE:-off}
     ports:
       - "${WEB_PORT:-18080}:8080"
     volumes:

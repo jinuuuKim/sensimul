@@ -23,6 +23,12 @@ func NewTemperature(initial, ambient float64) *TemperatureEngine {
 	}
 }
 
+// SetAmbient updates the outdoor/base temperature the engine relaxes toward.
+// Used to feed weather evidence values into the simulation.
+func (e *TemperatureEngine) SetAmbient(ambient float64) {
+	e.Ambient = ambient
+}
+
 func (e *TemperatureEngine) SetCooling(power float64) {
 	e.CoolingEffect = -math.Max(0, math.Min(power, 10))
 }
