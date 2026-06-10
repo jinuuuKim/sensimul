@@ -425,3 +425,7 @@ MIT License - 자세한 내용은 [LICENSE](LICENSE) 파일을 참조하세요.
 ## 🤝 기여
 
 버그 리포트, 기능 요청, PR은 언제나 환영합니다!
+
+## StockOps Admin-Web MQTT 연동
+
+`stockops-admin-web`는 MQTT over WebSocket(`listener 9001`, `protocol websockets`)로 실시간 센서 텔레메트리를 직접 구독합니다. 토픽 필터는 `sensimul/sites/+/sensors/+`이며, 자세한 내용은 [docs/USAGE.md](docs/USAGE.md)를 참고하세요.

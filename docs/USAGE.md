@@ -123,3 +123,24 @@ docker compose up -d --build
 docker compose ps
 docker compose logs --tail=100 sensimul-app
 ```
+
+## StockOps Admin-Web MQTT Subscription
+
+`stockops-admin-web` subscribes to live sensor telemetry directly through MQTT over WebSocket.
+
+Required broker listener:
+
+```text
+listener 9001 0.0.0.0
+protocol websockets
+listener_allow_anonymous false
+password_file /mosquitto/config/passwords
+```
+
+Admin-web topic filter:
+
+```text
+sensimul/sites/+/sensors/+
+```
+
+The API server should not persist live sensor measurements when this browser subscription path is enabled.
