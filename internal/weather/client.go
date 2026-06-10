@@ -29,6 +29,9 @@ type Weather struct {
 	HumidityPct  float64
 	PressureHPA  float64
 	WindSpeedMPS float64
+	PM10UgM3     float64
+	PM25UgM3     float64
+	HasPM10      bool // PM10 came from the KMA 황사 source (PM2.5 is not provided)
 	FetchedAt    time.Time
 	Source       Source
 }
@@ -44,9 +47,25 @@ type Client struct {
 	httpClient *http.Client
 	now        func() time.Time // injectable clock (tests / KST handling)
 
-	mu        sync.RWMutex
-	cache     *Weather
-	cacheTime time.Time
+	// PM10 황사 source (opt-in). Off until ConfigurePM is called.
+	pmMode    string
+	pmBaseURL string
+	pmColumn  int
+
+	mu          sync.RWMutex
+	cache       *Weather
+	cacheTime   time.Time
+	lastPM10    float64
+	hasLastPM10 bool
+}
+
+// ConfigurePM enables the KMA 황사 PM10 source. baseURL is the kma_pm10.php
+// endpoint and column is the 0-based PM10 column index in the data row (kept
+// configurable because the exact ASOS dust layout is verified per deployment).
+func (c *Client) ConfigurePM(baseURL string, column int) {
+	c.pmMode = ModeKMA
+	c.pmBaseURL = baseURL
+	c.pmColumn = column
 }
 
 func NewClient(mode, apiKey, baseURL, station string, ttl, timeout time.Duration) *Client {
@@ -98,8 +117,37 @@ func (c *Client) Get() (*Weather, error) {
 		return c.synthetic(), err
 	}
 
+	c.enrichPM(w)
 	c.setCache(w)
 	return w, nil
+}
+
+// enrichPM best-effort attaches KMA 황사 PM10 to the weather. A PM failure never
+// fails the primary fetch; the last-good PM10 is carried forward instead.
+func (c *Client) enrichPM(w *Weather) {
+	if c.pmMode != ModeKMA {
+		return
+	}
+
+	pm10, err := c.fetchPM10()
+	if err != nil {
+		c.mu.RLock()
+		lg, ok := c.lastPM10, c.hasLastPM10
+		c.mu.RUnlock()
+		if ok {
+			w.PM10UgM3 = lg
+			w.HasPM10 = true
+		}
+		return
+	}
+
+	w.PM10UgM3 = pm10
+	w.HasPM10 = true
+
+	c.mu.Lock()
+	c.lastPM10 = pm10
+	c.hasLastPM10 = true
+	c.mu.Unlock()
 }
 
 func (c *Client) synthetic() *Weather {

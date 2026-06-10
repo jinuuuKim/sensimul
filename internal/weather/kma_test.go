@@ -77,6 +77,38 @@ func TestParseKMASfctmNoDataRow(t *testing.T) {
 	}
 }
 
+// NOTE: the kma_pm10.php layout is not yet verified against a live response;
+// pmColumn is configurable for exactly that reason. This fixture pins the
+// parser's mechanics (skip headers, pick column, reject sentinels), not the
+// real column index.
+const pm10Body = `#START7777
+# TM           STN  PM10
+ 202606100900  108  47
+#7777END`
+
+func TestParsePM10(t *testing.T) {
+	v, err := parsePM10(pm10Body, 2)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if v != 47 {
+		t.Fatalf("pm10 = %v, want 47", v)
+	}
+}
+
+func TestParsePM10MissingRejected(t *testing.T) {
+	body := ` 202606100900 108 -9.0`
+	if _, err := parsePM10(body, 2); err == nil {
+		t.Fatal("expected error for -9.0 sentinel PM10")
+	}
+}
+
+func TestParsePM10ColumnOutOfRange(t *testing.T) {
+	if _, err := parsePM10(` 202606100900 108 47`, 9); err == nil {
+		t.Fatal("expected error when column index exceeds row width")
+	}
+}
+
 func TestLatestObservationHourKST(t *testing.T) {
 	// 2025-06-10 01:30 UTC == 10:30 KST → last completed hour 09:00 KST.
 	now := time.Date(2025, 6, 10, 1, 30, 0, 0, time.UTC)

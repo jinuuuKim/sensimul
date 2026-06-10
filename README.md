@@ -159,6 +159,9 @@ weather:
   station: "108"             # ASOS 지점번호 (108=서울)
   ttl: 3600s                 # ASOS는 매시간 갱신 → 1시간 주기(요청 주기)
   timeout: 10s               # KMA HTTP 요청 타임아웃
+  pm_mode: off               # off | kma (황사 PM10 소스, 기본 off)
+  pm_base_url: https://apihub.kma.go.kr/api/typ01/url/kma_pm10.php  # 황사 PM10
+  pm_column: 2               # PM10 컬럼(0-base); 라이브 응답 검증 후 조정
 
 logging:
   level: info                # 로그 레벨: debug, info, warn, error
@@ -411,6 +414,7 @@ sensimul/sites/{site_id}/test/result    # 테스트 결과
 |------|------|--------|
 | `SENSIMUL_WEATHER_API_KEY` | 기상청 API Hub authKey (mode=kma) | "" |
 | `SENSIMUL_WEATHER_STATION` | ASOS 지점번호 | 108 |
+| `SENSIMUL_WEATHER_PM_MODE` | 황사 PM10 소스 (off/kma) | off |
 | `SENSIMUL_MQTT_BROKER_URL` | MQTT 브로커 URL | tcp://localhost:1883 |
 | `SENSIMUL_MQTT_CLIENT_ID` | MQTT 클라이언트 ID | 자동생성 |
 | `SENSIMUL_MQTT_QOS` | MQTT QoS 레벨 | 1 |

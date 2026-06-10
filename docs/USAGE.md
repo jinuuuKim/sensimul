@@ -119,6 +119,32 @@ Get a free authKey at <https://apihub.kma.go.kr/>.
 > uses **PA (현지기압, local/station pressure)**, e.g. ~999 hPa at Seoul's
 > elevation — a site barometer reading, not sea-level PS.
 
+### Particulate (PM2.5 / PM10) and air-quality devices
+
+PM is modelled with the same ambient-relaxation engine as temperature/humidity.
+
+- **PM10 source:** opt-in `weather.pm_mode: kma` fetches KMA 황사 PM10
+  (`kma_pm10.php`). **PM2.5 is not provided by KMA 황사** and stays simulated.
+- **PM10 evidence (outdoor reference):** the KMA PM10 value when `pm_mode: kma`,
+  otherwise the simulated baseline.
+- **Air-quality controllers** drive the indoor PM target (physical opposites):
+  - **Air purifier ON** → PM relaxes toward a clean baseline (fast).
+  - **Ventilation (환풍기) ON** → PM relaxes toward the **outdoor** value (fast) —
+    during 황사 this raises indoor PM, by design.
+  - **All off (indoor)** → PM slowly relaxes toward `outdoor − offset` (indoor is
+    a bit cleaner than outside).
+  - **Outdoor site** → PM tracks the outdoor/KMA value directly.
+- **Wind:** outdoor wind speed (WS) speeds the humidity (evaporation) and PM
+  (ventilation) convergence *rate* toward ambient. It does not move the
+  equilibrium (the KMA reading already embeds wind), so the effect is a subtle
+  transient, not a large swing.
+
+> **PM10 verification status (pending).** Unlike the ASOS endpoint, the
+> `kma_pm10.php` column layout has **not** been verified against a live response,
+> so `pm_mode` defaults to **off**. `weather.pm_column` (default 2) is the 0-based
+> PM10 column index — call `kma_pm10.php?tm1=YYYYMMDDHH00&tm2=YYYYMMDDHH00&stn=108&help=1`,
+> confirm the column, adjust `pm_column` if needed, then set `pm_mode: kma`.
+
 ## 4) Docker Run
 
 ### MQTT only

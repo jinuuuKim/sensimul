@@ -19,6 +19,9 @@ weather:
   station: "108"                                               # ASOS 지점번호 (108=서울)
   ttl: 3600s                                                   # ASOS는 매시간 갱신 → 1시간 주기
   timeout: 10s                                                 # KMA HTTP 요청 타임아웃
+  pm_mode: off                                                 # off | kma (황사 PM10 소스, 기본 off)
+  pm_base_url: https://apihub.kma.go.kr/api/typ01/url/kma_pm10.php  # 황사 PM10 관측
+  pm_column: 2                                                 # 데이터행 PM10 컬럼(0-base). 라이브 응답으로 검증 후 조정
 
 logging:
   level: info

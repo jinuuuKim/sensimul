@@ -33,6 +33,7 @@ services:
       SENSIMUL_WEATHER_MODE: ${SENSIMUL_WEATHER_MODE:-synthetic}
       SENSIMUL_WEATHER_API_KEY: ${SENSIMUL_WEATHER_API_KEY:-}
       SENSIMUL_WEATHER_STATION: ${SENSIMUL_WEATHER_STATION:-108}
+      SENSIMUL_WEATHER_PM_MODE: ${SENSIMUL_WEATHER_PM_MODE:-off}
     volumes:
       - ./data:/app/data
       - ./config/sensimul.yaml:/app/config/sensimul.yaml:ro
@@ -54,6 +55,7 @@ services:
       SENSIMUL_WEATHER_MODE: ${SENSIMUL_WEATHER_MODE:-synthetic}
       SENSIMUL_WEATHER_API_KEY: ${SENSIMUL_WEATHER_API_KEY:-}
       SENSIMUL_WEATHER_STATION: ${SENSIMUL_WEATHER_STATION:-108}
+      SENSIMUL_WEATHER_PM_MODE: ${SENSIMUL_WEATHER_PM_MODE:-off}
     ports:
       - "${WEB_PORT:-18080}:8080"
     volumes:

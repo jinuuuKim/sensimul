@@ -55,6 +55,9 @@ func New(configPath string) (*App, error) {
 		cfg.Weather.TTL,
 		cfg.Weather.Timeout,
 	)
+	if cfg.Weather.PMMode == "kma" {
+		weatherClient.ConfigurePM(cfg.Weather.PMBaseURL, cfg.Weather.PMColumn)
+	}
 	if err := weatherClient.Validate(); err != nil {
 		repo.Close()
 		return nil, domain.NewConfigError("invalid weather configuration", err)

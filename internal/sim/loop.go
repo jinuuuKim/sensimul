@@ -17,6 +17,23 @@ import (
 	"github.com/sensimul/sensimul/internal/weather"
 )
 
+// Particulate model tuning. PM ambient targets and rates set per tick.
+const (
+	cleanPM25 = 5.0  // 청정 기준값 (good air, purifier target)
+	cleanPM10 = 10.0 // 청정 기준값
+
+	indoorOffsetPM25 = 5.0  // 실내는 실외보다 이만큼 낮게 수렴 (off 상태)
+	indoorOffsetPM10 = 10.0 // 실내는 실외보다 이만큼 낮게 수렴 (off 상태)
+
+	pmRateBase = 0.05 // 기본 수렴 속도 (실외)
+	pmRateFast = 0.30 // 디바이스 ON 시 빠른 수렴
+	pmRateSlow = 0.01 // 실내 OFF 시 천천히 수렴
+
+	humidityBaseK  = 0.05 // 습도 기본 수렴 속도 (physics.NewHumidity와 일치)
+	windEvapFactor = 0.03 // 풍속 → 증발(습도 수렴) 가속 계수
+	windVentFactor = 0.05 // 풍속 → 환기(미세먼지 수렴) 가속 계수
+)
+
 type Loop struct {
 	state               *State
 	clock               clock.Clock
@@ -196,6 +213,8 @@ func (l *Loop) tick() error {
 	}
 
 	l.resolveControllers()
+	l.resolveParticulate()
+	l.applyWindEffects()
 	l.processTestRequests()
 	dt := l.tickSeconds()
 
@@ -334,6 +353,9 @@ func (l *Loop) refreshWeather() error {
 		HumidityPct:  w.HumidityPct,
 		PressureHPA:  w.PressureHPA,
 		WindSpeedMPS: w.WindSpeedMPS,
+		PM25UgM3:     w.PM25UgM3,
+		PM10UgM3:     w.PM10UgM3,
+		HasPM:        w.HasPM10,
 		Source:       string(w.Source),
 	}
 
@@ -368,11 +390,8 @@ func (l *Loop) resolveControllers() {
 				l.state.HumidityEngine.SetHumidifying(power)
 			case domain.Dehumidifying:
 				l.state.HumidityEngine.SetDehumidifying(power)
-			case domain.Ventilation:
-				outdoorPM25, outdoorPM10 := l.outdoorParticulate()
-				l.state.Particulate.ApplyVentilation(power/10, outdoorPM25, outdoorPM10)
-			case domain.AirPurifier:
-				l.state.Particulate.ApplyAirPurifier(power / 10)
+			case domain.Ventilation, domain.AirPurifier:
+				// Air-quality controllers drive PM ambient in resolveParticulate.
 			}
 			activeControllers[ctrl.TargetAxis] = true
 		}
@@ -401,13 +420,93 @@ func (l *Loop) tickSeconds() float64 {
 	return dt
 }
 
+// outdoorParticulate returns the outdoor PM reference. PM10 uses the KMA 황사
+// evidence when available; PM2.5 always uses the simulated baseline (KMA 황사
+// provides PM10 only — PM2.5 stays simulated).
 func (l *Loop) outdoorParticulate() (float64, float64) {
-	if l.state.Weather == nil {
-		return l.state.Site.Env.PM25UgM3, l.state.Site.Env.PM10UgM3
+	pm25 := l.state.BaselinePM25
+	pm10 := l.state.BaselinePM10
+	if l.state.Weather != nil && l.state.Weather.HasPM {
+		pm10 = l.state.Weather.PM10UgM3
 	}
-	// Weather API does not provide PM directly in current snapshot,
-	// so the last simulated site values are used as a stable baseline.
-	return l.state.Site.Env.PM25UgM3, l.state.Site.Env.PM10UgM3
+	return pm25, pm10
+}
+
+// resolveParticulate sets the PM ambient target and convergence rate from the
+// air-quality controller state and site type. Air purifier and ventilation are
+// modelled as physical opposites: a purifier cleans toward a low baseline, while
+// ventilation exchanges with outside air (pulling PM toward the outdoor value).
+func (l *Loop) resolveParticulate() {
+	outdoorPM25, outdoorPM10 := l.outdoorParticulate()
+
+	purifierOn := false
+	ventilationOn := false
+	for _, ctrl := range l.state.Controllers {
+		if ctrl.Status != domain.ControllerStatusOn || ctrl.OutputLevel <= 0 {
+			continue
+		}
+		switch ctrl.Type {
+		case domain.AirPurifier:
+			purifierOn = true
+		case domain.Ventilation:
+			ventilationOn = true
+		}
+	}
+
+	switch {
+	case purifierOn:
+		// 공기청정기 ON → 청정 기준값으로 빠르게 수렴.
+		l.state.Particulate.SetAmbient(cleanPM25, cleanPM10)
+		l.state.Particulate.SetRate(pmRateFast)
+	case ventilationOn:
+		// 환풍기 ON → 외부 공기 유입 → 실외(황사) 값으로 빠르게 수렴.
+		l.state.Particulate.SetAmbient(outdoorPM25, outdoorPM10)
+		l.state.Particulate.SetRate(pmRateFast)
+	case l.state.Site.Type == domain.SiteTypeOutdoor:
+		// 실외: 기상청 PM 값에 수렴 (풍속이 환기를 가속).
+		l.state.Particulate.SetAmbient(outdoorPM25, outdoorPM10)
+		l.state.Particulate.SetRate(l.windAdjustedRate(pmRateBase, windVentFactor))
+	default:
+		// 실내 OFF → 천천히 (실외 - 일정값)에 수렴 (실내라 약간 더 깨끗).
+		l.state.Particulate.SetAmbient(
+			maxFloat(0, outdoorPM25-indoorOffsetPM25),
+			maxFloat(0, outdoorPM10-indoorOffsetPM10),
+		)
+		l.state.Particulate.SetRate(pmRateSlow)
+	}
+}
+
+// applyWindEffects connects outdoor wind speed to the evaporation (humidity)
+// convergence rate. Wind speeds up mixing toward the ambient value but does not
+// change the equilibrium (the KMA reading already embeds wind), so this is a
+// transient effect. Indoor sites and missing weather keep the base rate.
+func (l *Loop) applyWindEffects() {
+	if l.state.Site.Type != domain.SiteTypeOutdoor || l.state.Weather == nil {
+		l.state.HumidityEngine.K = humidityBaseK
+		return
+	}
+	l.state.HumidityEngine.K = humidityBaseK * windFactor(l.state.Weather.WindSpeedMPS, windEvapFactor)
+}
+
+func (l *Loop) windAdjustedRate(base, factor float64) float64 {
+	if l.state.Weather == nil {
+		return base
+	}
+	return base * windFactor(l.state.Weather.WindSpeedMPS, factor)
+}
+
+func windFactor(windMPS, factor float64) float64 {
+	if windMPS <= 0 {
+		return 1
+	}
+	return 1 + factor*windMPS
+}
+
+func maxFloat(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (l *Loop) publishSensors() {

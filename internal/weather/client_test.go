@@ -96,6 +96,57 @@ func TestKMAFailureRetainsLastGood(t *testing.T) {
 	}
 }
 
+func TestKMAEnrichesPM10WhenConfigured(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/pm10" {
+			_, _ = w.Write([]byte(" 202606100900 108 47"))
+			return
+		}
+		_, _ = w.Write([]byte(representativeBody))
+	}))
+	defer srv.Close()
+
+	c := NewClient(ModeKMA, "secret", srv.URL+"/sfctm", "108", time.Minute, time.Second)
+	c.ConfigurePM(srv.URL+"/pm10", 2)
+
+	w, err := c.Get()
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !w.HasPM10 || w.PM10UgM3 != 47 {
+		t.Fatalf("expected PM10=47 enriched, got HasPM10=%v PM10=%v", w.HasPM10, w.PM10UgM3)
+	}
+	// Primary weather still intact.
+	if w.TemperatureC != 20.9 {
+		t.Fatalf("primary weather lost: temp=%v", w.TemperatureC)
+	}
+}
+
+func TestKMAPM10FailureDoesNotFailPrimary(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/pm10" {
+			http.Error(w, "pm down", http.StatusBadGateway)
+			return
+		}
+		_, _ = w.Write([]byte(representativeBody))
+	}))
+	defer srv.Close()
+
+	c := NewClient(ModeKMA, "secret", srv.URL+"/sfctm", "108", time.Minute, time.Second)
+	c.ConfigurePM(srv.URL+"/pm10", 2)
+
+	w, err := c.Get()
+	if err != nil {
+		t.Fatalf("primary should succeed despite PM failure: %v", err)
+	}
+	if w.TemperatureC != 20.9 {
+		t.Fatalf("primary weather lost: temp=%v", w.TemperatureC)
+	}
+	if w.HasPM10 {
+		t.Fatalf("PM10 should be absent on PM failure with no prior, got %v", w.PM10UgM3)
+	}
+}
+
 func TestKMAFailureNoPriorFallsBackToSynthetic(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upstream down", http.StatusBadGateway)

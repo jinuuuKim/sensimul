@@ -145,3 +145,100 @@ func TestIndoorControllerOverridesWeather(t *testing.T) {
 		t.Fatalf("cooler on must drive temp below weather ambient, got %.2f", state.TempEngine.Current)
 	}
 }
+
+func newLoopWith(state *State, siteID string) *Loop {
+	return NewLoop(state, LoopConfig{TickInterval: time.Second}, nil, nil, nil, nil, siteID)
+}
+
+func stepParticulate(loop *Loop, state *State, n int) {
+	for i := 0; i < n; i++ {
+		loop.resolveParticulate()
+		state.Particulate.Step(1.0)
+	}
+}
+
+func TestIndoorPurifierConvergesToCleanPM(t *testing.T) {
+	site := domain.NewSite("IN1", "Indoor", domain.SiteTypeIndoor, 37.5, 126.9)
+	state := NewState(site, 1)
+	state.Particulate.PM25, state.Particulate.PM10 = 120, 200 // dusty
+
+	ap, err := domain.NewController("AP1", site.ID, domain.AirPurifier, domain.SiteTypeIndoor)
+	if err != nil {
+		t.Fatalf("controller: %v", err)
+	}
+	ap.Status, ap.OutputLevel = domain.ControllerStatusOn, 80
+	state.AddController(ap)
+
+	loop := newLoopWith(state, site.ID)
+	stepParticulate(loop, state, 1000)
+
+	if math.Abs(state.Particulate.PM25-cleanPM25) > 0.5 || math.Abs(state.Particulate.PM10-cleanPM10) > 0.5 {
+		t.Fatalf("purifier on: PM=%.1f/%.1f want clean %.0f/%.0f",
+			state.Particulate.PM25, state.Particulate.PM10, cleanPM25, cleanPM10)
+	}
+}
+
+func TestIndoorVentilationConvergesToOutdoorPM(t *testing.T) {
+	site := domain.NewSite("IN2", "Indoor", domain.SiteTypeIndoor, 37.5, 126.9)
+	state := NewState(site, 1)
+	state.Particulate.PM25, state.Particulate.PM10 = 5, 10 // start clean
+	state.Weather = &WeatherSnapshot{PM10UgM3: 150, HasPM: true}
+
+	vent, err := domain.NewController("V1", site.ID, domain.Ventilation, domain.SiteTypeIndoor)
+	if err != nil {
+		t.Fatalf("controller: %v", err)
+	}
+	vent.Status, vent.OutputLevel = domain.ControllerStatusOn, 80
+	state.AddController(vent)
+
+	loop := newLoopWith(state, site.ID)
+	stepParticulate(loop, state, 1000)
+
+	// 환풍기 ON: PM10 pulled to outdoor (150). PM2.5 → simulated baseline.
+	if math.Abs(state.Particulate.PM10-150) > 1.0 {
+		t.Fatalf("ventilation on: PM10=%.1f want ~150 (outdoor)", state.Particulate.PM10)
+	}
+	if math.Abs(state.Particulate.PM25-state.BaselinePM25) > 1.0 {
+		t.Fatalf("ventilation on: PM2.5=%.1f want baseline %.1f", state.Particulate.PM25, state.BaselinePM25)
+	}
+}
+
+func TestIndoorOffConvergesToOutdoorMinusOffset(t *testing.T) {
+	site := domain.NewSite("IN3", "Indoor", domain.SiteTypeIndoor, 37.5, 126.9)
+	state := NewState(site, 1)
+	state.Weather = &WeatherSnapshot{PM10UgM3: 150, HasPM: true}
+
+	loop := newLoopWith(state, site.ID)
+	stepParticulate(loop, state, 3000) // slow rate
+
+	wantPM10 := 150 - indoorOffsetPM10
+	wantPM25 := state.BaselinePM25 - indoorOffsetPM25
+	if math.Abs(state.Particulate.PM10-wantPM10) > 1.5 {
+		t.Fatalf("indoor off: PM10=%.1f want ~%.1f (outdoor-offset)", state.Particulate.PM10, wantPM10)
+	}
+	if math.Abs(state.Particulate.PM25-wantPM25) > 1.5 {
+		t.Fatalf("indoor off: PM2.5=%.1f want ~%.1f", state.Particulate.PM25, wantPM25)
+	}
+}
+
+func TestWindBoostsHumidityRateOutdoorOnly(t *testing.T) {
+	out := domain.NewSite("OUT9", "Outdoor", domain.SiteTypeOutdoor, 37.5, 126.9)
+	state := NewState(out, 1)
+	state.Weather = &WeatherSnapshot{WindSpeedMPS: 10}
+	loop := newLoopWith(state, out.ID)
+
+	loop.applyWindEffects()
+	want := humidityBaseK * (1 + windEvapFactor*10)
+	if math.Abs(state.HumidityEngine.K-want) > 1e-9 {
+		t.Fatalf("outdoor wind: humidity K=%.4f want %.4f", state.HumidityEngine.K, want)
+	}
+
+	in := domain.NewSite("IN9", "Indoor", domain.SiteTypeIndoor, 37.5, 126.9)
+	istate := NewState(in, 1)
+	istate.Weather = &WeatherSnapshot{WindSpeedMPS: 10}
+	iloop := newLoopWith(istate, in.ID)
+	iloop.applyWindEffects()
+	if math.Abs(istate.HumidityEngine.K-humidityBaseK) > 1e-9 {
+		t.Fatalf("indoor wind must not change humidity K, got %.4f", istate.HumidityEngine.K)
+	}
+}

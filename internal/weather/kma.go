@@ -83,6 +83,81 @@ func (c *Client) fetchKMA() (*Weather, error) {
 	return w, nil
 }
 
+// fetchPM10 pulls the latest 황사 PM10 observation (kma_pm10.php) for the
+// configured station. This endpoint is the tm1/tm2 range variant, so we request
+// a single hour (tm1 == tm2). The PM10 column index is configurable because the
+// exact dust-observation layout must be verified against a live response.
+func (c *Client) fetchPM10() (float64, error) {
+	tm := latestObservationHourKST(c.now())
+
+	endpoint, err := url.Parse(c.pmBaseURL)
+	if err != nil {
+		return 0, fmt.Errorf("invalid pm base url: %w", err)
+	}
+	q := endpoint.Query()
+	q.Set("tm1", tm)
+	q.Set("tm2", tm)
+	q.Set("stn", c.Station)
+	q.Set("help", "0")
+	q.Set("authKey", c.APIKey)
+	endpoint.RawQuery = q.Encode()
+
+	ctx, cancel := context.WithTimeout(context.Background(), c.Timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return 0, fmt.Errorf("build pm10 request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("pm10 request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return 0, fmt.Errorf("read pm10 response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("pm10 returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	return parsePM10(string(body), c.pmColumn)
+}
+
+// parsePM10 extracts the PM10 concentration (µg/m³) from a kma_pm10.php data row
+// at the given 0-based column. Returns an error if no usable row exists or the
+// value is missing, so the caller can retain the previous evidence.
+func parsePM10(body string, column int) (float64, error) {
+	var fields []string
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields = strings.Fields(line)
+		break
+	}
+
+	if fields == nil {
+		return 0, fmt.Errorf("pm10 response contained no data row")
+	}
+	if column < 0 || column >= len(fields) {
+		return 0, fmt.Errorf("pm10 column %d out of range (%d fields)", column, len(fields))
+	}
+
+	v, err := strconv.ParseFloat(fields[column], 64)
+	if err != nil {
+		return 0, fmt.Errorf("pm10 value %q invalid: %w", fields[column], err)
+	}
+	if isKMAMissing(v) || v < 0 || v > 10000 {
+		return 0, fmt.Errorf("pm10 value %v missing or out of range", v)
+	}
+	return v, nil
+}
+
 // latestObservationHourKST returns the last completed hour in KST formatted as
 // YYYYMMDDHHMM (minutes always "00"). ASOS hourly data for the current hour is
 // not published immediately, so we step back one hour from now.
