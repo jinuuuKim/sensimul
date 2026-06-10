@@ -39,7 +39,7 @@ SenSimul은 물류창고, 냉동창고, 야외적치장 등 다양한 현장의 
 | **현장 유형 지원** | 실내(Indoor) / 실외(Outdoor) 환경 분리 시뮬레이션 |
 | **물리 기반 모델** | 뉴턴 냉각 법칙, 증발/응결 모델 적용 |
 | **환경 조절 시뮬레이션** | 냉방/난방/가습/제습 조절기 ON/OFF 상태 반영 |
-| **날씨 API 연동** | 실외 현장은 OpenWeatherMap 실시간 기상 데이터 반영 |
+| **날씨 API 연동** | 실외 현장은 기상청(KMA) ASOS 실시간 기상 데이터를 센서 생성의 기반값(evidence)으로 반영 |
 | **장애 시뮬레이션** | 센서 오류, 조절기 고장, 정전 등 다양한 장애 상황 재현 |
 | **MQTT 통신** | 계층적 토픽 구조로 데이터 발행 (QoS 0/1/2 지원) |
 | **웹 클라이언트** | 사이트/센서/조절기 관리 및 실시간 데이터 모니터링 |
@@ -153,9 +153,12 @@ mqtt:
   retain: false                  # Retain 메시지 여부
 
 weather:
-  mode: synthetic            # 날씨 모드: synthetic, openweathermap
-  api_key: ""                # OpenWeatherMap API 키 (선택)
-  ttl: 300s                  # 날씨 캐시 TTL
+  mode: synthetic            # 날씨 모드: synthetic, kma(기상청 API Hub)
+  api_key: ""                # 기상청 API Hub authKey (mode=kma 필수)
+  base_url: https://apihub.kma.go.kr/api/typ01/url/kma_sfctm2.php  # 지상관측(ASOS) 시간자료(특정시각)
+  station: "108"             # ASOS 지점번호 (108=서울)
+  ttl: 3600s                 # ASOS는 매시간 갱신 → 1시간 주기(요청 주기)
+  timeout: 10s               # KMA HTTP 요청 타임아웃
 
 logging:
   level: info                # 로그 레벨: debug, info, warn, error
@@ -356,13 +359,14 @@ open http://localhost:18080
 
 ```bash
 # 1. 실제 날씨 데이터 사용 (선택)
-# OpenWeatherMap API 키 발급 후 설정
-export SENSIMUL_WEATHER_API_KEY="your_api_key"
+# 기상청 API Hub(https://apihub.kma.go.kr/) authKey 발급 후 설정
+export SENSIMUL_WEATHER_API_KEY="your_kma_auth_key"
 
 # config/sensimul.yaml 수정
 # weather:
-#   mode: openweathermap
+#   mode: kma
 #   api_key: "${SENSIMUL_WEATHER_API_KEY}"
+#   station: "108"   # ASOS 지점번호 (108=서울)
 
 # 2. 프로덕션 모드 설정
 export SENSIMUL_MODE=prodlike
@@ -405,7 +409,8 @@ sensimul/sites/{site_id}/test/result    # 테스트 결과
 
 | 변수 | 설명 | 기본값 |
 |------|------|--------|
-| `SENSIMUL_WEATHER_API_KEY` | OpenWeatherMap API 키 | "" |
+| `SENSIMUL_WEATHER_API_KEY` | 기상청 API Hub authKey (mode=kma) | "" |
+| `SENSIMUL_WEATHER_STATION` | ASOS 지점번호 | 108 |
 | `SENSIMUL_MQTT_BROKER_URL` | MQTT 브로커 URL | tcp://localhost:1883 |
 | `SENSIMUL_MQTT_CLIENT_ID` | MQTT 클라이언트 ID | 자동생성 |
 | `SENSIMUL_MQTT_QOS` | MQTT QoS 레벨 | 1 |

@@ -33,6 +33,7 @@ type Loop struct {
 	configCheckInterval time.Duration
 	lastConfigCheck     time.Time
 	defaultTickInterval time.Duration
+	weatherInitialized  bool
 }
 
 type LoopConfig struct {
@@ -299,14 +300,35 @@ func (l *Loop) findSensor(sensorID string) *domain.Sensor {
 }
 
 func (l *Loop) shouldRefreshWeather() bool {
-	return l.state.Site.Type == domain.SiteTypeOutdoor && l.weatherSvc != nil
+	// Both indoor and outdoor sites consume weather: outdoor sites run on it
+	// directly, while indoor sites relax toward it whenever their controllers are
+	// off (조절기 off → 기상청 값에 수렴).
+	return l.weatherSvc != nil
 }
 
+// refreshWeather pulls the current weather evidence and feeds it into the
+// simulation as a base value. The KMA response is not stored wholesale; only the
+// engines' ambient/base values are seeded or nudged.
+//
+//   - Every fetch sets the engines' ambient target to the observation. With no
+//     active controller on an axis the engine relaxes to this ambient, so the
+//     sensor converges to the KMA value ("값 조정"). Active controllers
+//     (cooling/heating/humidify/dehumidify) bias the equilibrium away from it.
+//   - Outdoor sites additionally snap their CURRENT value to the first
+//     observation so a freshly configured site starts from real outdoor
+//     conditions ("초기 기반 값"). Indoor sites keep their configured baseline as
+//     the starting point and only drift toward the observation when controllers
+//     are off.
+//
+// Get always returns a usable snapshot; a non-nil error means a live fetch
+// failed but a fallback (last-good cache / synthetic) was applied, which we log
+// without discarding the value.
 func (l *Loop) refreshWeather() error {
 	w, err := l.weatherSvc.Get()
-	if err != nil {
+	if w == nil {
 		return err
 	}
+
 	l.state.Weather = &WeatherSnapshot{
 		TemperatureC: w.TemperatureC,
 		HumidityPct:  w.HumidityPct,
@@ -314,7 +336,21 @@ func (l *Loop) refreshWeather() error {
 		WindSpeedMPS: w.WindSpeedMPS,
 		Source:       string(w.Source),
 	}
-	return nil
+
+	if l.state.Site.Type == domain.SiteTypeOutdoor && !l.weatherInitialized {
+		l.state.TempEngine.Current = w.TemperatureC
+		l.state.HumidityEngine.Current = w.HumidityPct
+	}
+
+	l.state.TempEngine.SetAmbient(w.TemperatureC)
+	l.state.HumidityEngine.SetAmbient(w.HumidityPct)
+
+	// Pressure has no dynamic engine; the weather observation is the base value.
+	l.state.Site.Env.PressureHPA = w.PressureHPA
+
+	l.weatherInitialized = true
+
+	return err
 }
 
 func (l *Loop) resolveControllers() {

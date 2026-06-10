@@ -7,7 +7,7 @@ import (
 
 type HumidityEngine struct {
 	Current             float64
-	EvaporationRate     float64
+	Ambient             float64
 	K                   float64
 	HumidifyingEffect   float64
 	DehumidifyingEffect float64
@@ -16,11 +16,17 @@ type HumidityEngine struct {
 
 func NewHumidity(initial float64) *HumidityEngine {
 	return &HumidityEngine{
-		Current:         initial,
-		EvaporationRate: 0.5,
-		K:               0.05,
-		NoiseSigma:      0.1,
+		Current:    initial,
+		Ambient:    initial,
+		K:          0.05,
+		NoiseSigma: 0.1,
 	}
+}
+
+// SetAmbient updates the outdoor/base humidity the engine relaxes toward.
+// Used to feed weather evidence values into the simulation.
+func (e *HumidityEngine) SetAmbient(ambient float64) {
+	e.Ambient = ambient
 }
 
 func (e *HumidityEngine) SetHumidifying(power float64) {
@@ -35,7 +41,10 @@ func (e *HumidityEngine) Step(dt float64) float64 {
 	ambientVariation := (rand.Float64() - 0.5) * 0.3
 	noise := (rand.Float64() - 0.5) * e.NoiseSigma * 2
 
-	e.Current += (e.EvaporationRate + ambientVariation - e.K*e.Current + e.HumidifyingEffect + e.DehumidifyingEffect) * dt
+	// Relax toward the base/ambient humidity so the simulated value converges to
+	// the evidence value (KMA RH for outdoor, configured baseline for indoor).
+	// Controllers (humidifier/dehumidifier) bias the equilibrium when active.
+	e.Current += (ambientVariation - e.K*(e.Current-e.Ambient) + e.HumidifyingEffect + e.DehumidifyingEffect) * dt
 	e.Current += noise * dt
 	e.Current = math.Max(0, math.Min(100, e.Current))
 	return e.Current
