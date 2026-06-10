@@ -16,3 +16,25 @@
 - [ ] Any credential previously committed in local files has been rotated.
 - [ ] Any Terraform state that contained generated passwords has been removed from Git history before public push.
 - [ ] GitHub environment secrets exist for `dev`, `test`, and `prod` where applicable.
+## Gitea To GitHub Mirror
+
+Use Gitea push mirror from the active Gitea repository to the matching public GitHub repository.
+
+1. Create the empty GitHub repository first.
+2. Create a GitHub token with repository write permission for the target public repository.
+3. In Gitea, open repository settings.
+4. Add a push mirror using `https://github.com/<owner>/<repo>.git`.
+5. Use the GitHub username and token in the authorization fields.
+6. Enable sync on push if available.
+7. Treat GitHub as read-only for human contributors.
+
+Public GitHub direct commits must not be used because a Gitea push mirror can overwrite GitHub-side changes.
+
+## GitHub Environment Policy
+
+- `dev`: CI and non-production deploy workflows may run automatically after merge.
+- `test`: workflow dispatch or release-candidate branches only.
+- `prod`: workflow dispatch only, protected branch or tag, required reviewer, and separate production secrets.
+
+Repository-level secrets are allowed for CI-only values.
+Deployment secrets must use environment secrets.
