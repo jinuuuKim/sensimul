@@ -296,11 +296,11 @@ export SENSIMUL_MODE="dev"
 #### 시뮬레이션 실행
 
 ```bash
-# 기본 실행
+# 기본 실행 (site_id 빈값 → 모든 현장을 동시에 시뮬레이션)
 ./build/sensimul run --config config/sensimul.yaml
 
-# 특정 사이트만 실행
-./build/sensimul run --config config/sensimul.yaml --site SEOUL_COLD
+# 특정 사이트만 실행 (config의 site_id 또는 환경변수로 지정)
+SENSIMUL_SITE_ID=SEOUL_COLD ./build/sensimul run --config config/sensimul.yaml
 
 # 로그 레벨 조정
 SENSIMUL_LOGGING_LEVEL=debug ./build/sensimul run

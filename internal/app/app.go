@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -98,26 +99,110 @@ func (a *App) Health(ctx context.Context) error {
 	return nil
 }
 
+// Run simulates the resolved site(s). With weather.site_id set (or only one site
+// present) it runs that single site; otherwise it runs every site concurrently,
+// each on its own MQTT client id and simulation loop.
 func (a *App) Run(ctx context.Context) error {
-	site, err := a.bootstrapSite()
+	sites, err := a.resolveSites()
 	if err != nil {
 		return err
 	}
 
-	sensors, err := a.bootstrapSensors(site.ID)
+	if len(sites) == 1 {
+		return a.runSite(ctx, &sites[0], a.Publisher)
+	}
+	return a.runMultiSite(ctx, sites)
+}
+
+// runSite builds and runs one site's loop until ctx is done. The publisher is
+// connected here; the caller owns its Close().
+func (a *App) runSite(ctx context.Context, site *domain.Site, pub *mqtt.Publisher) error {
+	loop, err := a.buildLoop(ctx, site, pub)
 	if err != nil {
 		return err
+	}
+
+	a.Logger.Info().
+		Str("site_id", site.ID).
+		Dur("tick_interval", a.Config.TickInterval).
+		Msg("starting simulation")
+
+	if err := loop.Start(ctx); err != nil {
+		return domain.NewRuntimeError("simulation loop failed", err)
+	}
+	return nil
+}
+
+// runMultiSite runs every site concurrently. Loops are built serially (the only
+// DB writes and MQTT connects happen here) and then started together; each gets
+// its own publisher/client id so they don't evict each other on the broker.
+func (a *App) runMultiSite(ctx context.Context, sites []domain.Site) error {
+	type built struct {
+		site *domain.Site
+		loop *sim.Loop
+		pub  *mqtt.Publisher
+	}
+
+	items := make([]built, 0, len(sites))
+	for i := range sites {
+		site := &sites[i]
+		pub := a.newSitePublisher(site.ID)
+		loop, err := a.buildLoop(ctx, site, pub)
+		if err != nil {
+			for _, it := range items {
+				it.pub.Close()
+			}
+			pub.Close()
+			return err
+		}
+		items = append(items, built{site: site, loop: loop, pub: pub})
+	}
+
+	a.Logger.Info().Int("sites", len(items)).Msg("starting multi-site simulation")
+
+	var wg sync.WaitGroup
+	errs := make(chan error, len(items))
+	for _, it := range items {
+		it := it
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer it.pub.Close()
+			if err := it.loop.Start(ctx); err != nil {
+				a.Logger.Error().Err(err).Str("site_id", it.site.ID).Msg("site simulation failed")
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// buildLoop bootstraps the site's sensors/controllers, connects pub (best-effort
+// — on failure the site runs without publishing), and constructs the loop.
+func (a *App) buildLoop(ctx context.Context, site *domain.Site, pub *mqtt.Publisher) (*sim.Loop, error) {
+	sensors, err := a.bootstrapSensors(site.ID)
+	if err != nil {
+		return nil, err
 	}
 
 	controllers, err := a.bootstrapControllers(site)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	if a.Publisher != nil {
-		if err := a.Publisher.Connect(ctx); err != nil {
-			a.Logger.Warn().Err(err).Msg("mqtt unavailable - simulation will continue without publish")
-			a.Publisher = nil
+	publishTo := pub
+	if publishTo != nil {
+		if err := publishTo.Connect(ctx); err != nil {
+			a.Logger.Warn().Err(err).Str("site_id", site.ID).Msg("mqtt unavailable - site continues without publish")
+			publishTo = nil
 		}
 	}
 
@@ -139,25 +224,35 @@ func (a *App) Run(ctx context.Context) error {
 			Seed:         a.Config.Seed,
 		},
 		clock.NewReal(a.Config.TickInterval),
-		a.Publisher,
+		publishTo,
 		a.Weather,
 		a.Repo,
 		site.ID,
 	)
-
-	a.Logger.Info().
-		Str("site_id", site.ID).
-		Dur("tick_interval", a.Config.TickInterval).
-		Msg("starting simulation")
-
-	if err := loop.Start(ctx); err != nil {
-		return domain.NewRuntimeError("simulation loop failed", err)
-	}
-
-	return nil
+	return loop, nil
 }
 
-func (a *App) bootstrapSite() (*domain.Site, error) {
+// newSitePublisher creates a publisher with a per-site client id so concurrent
+// sites do not collide on the broker (a shared client id would evict peers).
+func (a *App) newSitePublisher(siteID string) *mqtt.Publisher {
+	base := a.Config.MQTT.ClientID
+	if base == "" {
+		base = "sensimul"
+	}
+	return mqtt.NewPublisher(
+		mqtt.Options{
+			BrokerURL: a.Config.MQTT.BrokerURL,
+			ClientID:  base + "-" + siteID,
+			QoS:       a.Config.MQTT.QoS,
+			Retain:    a.Config.MQTT.Retain,
+		},
+		logging.NewLogger("mqtt"),
+	)
+}
+
+// resolveSites returns the site(s) to simulate: the configured site_id (created
+// if missing), or all sites in the repository, or a freshly created default.
+func (a *App) resolveSites() ([]domain.Site, error) {
 	if a.Config.SiteID != "" {
 		site, err := a.Repo.GetSite(a.Config.SiteID)
 		if err != nil {
@@ -170,7 +265,7 @@ func (a *App) bootstrapSite() (*domain.Site, error) {
 				return nil, domain.NewRuntimeError("failed to create configured site", err)
 			}
 		}
-		return site, nil
+		return []domain.Site{*site}, nil
 	}
 
 	sites, err := a.Repo.ListSites()
@@ -178,8 +273,7 @@ func (a *App) bootstrapSite() (*domain.Site, error) {
 		return nil, domain.NewRuntimeError("failed to list sites", err)
 	}
 	if len(sites) > 0 {
-		site := sites[0]
-		return &site, nil
+		return sites, nil
 	}
 
 	defaultID := fmt.Sprintf("default-%d", time.Now().Unix())
@@ -187,7 +281,7 @@ func (a *App) bootstrapSite() (*domain.Site, error) {
 	if err := a.Repo.CreateSite(site); err != nil {
 		return nil, domain.NewRuntimeError("failed to create default site", err)
 	}
-	return site, nil
+	return []domain.Site{*site}, nil
 }
 
 func (a *App) bootstrapSensors(siteID string) ([]domain.Sensor, error) {
