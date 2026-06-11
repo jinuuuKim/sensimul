@@ -27,6 +27,13 @@
     </tbody>
   </table>
 </div>
-<script>window.sensimulLiveStream && window.sensimulLiveStream('/events/live');</script>
+<script>
+  // app.js is loaded with `defer`, so it runs AFTER this inline script during
+  // parsing — wait for DOMContentLoaded (which fires after deferred scripts) so
+  // the live stream actually starts.
+  document.addEventListener('DOMContentLoaded', function () {
+    if (window.sensimulLiveStream) window.sensimulLiveStream('/events/live');
+  });
+</script>
 {{template "footer" .}}
 {{end}}

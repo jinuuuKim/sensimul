@@ -630,6 +630,8 @@ func (s *Server) sse(w http.ResponseWriter, r *http.Request, subscribe func() (c
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	// Disable proxy buffering (nginx etc.) so events are not held back.
+	w.Header().Set("X-Accel-Buffering", "no")
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {

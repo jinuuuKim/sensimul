@@ -16,13 +16,17 @@
 </div>
 
 <script>
-window.sensimulSensorDetail && window.sensimulSensorDetail({
-  sensorId: '{{.Sensor.ID}}',
-  liveEventUrl: '/events/live',
-  testEventUrl: '/events/tests/{{.Sensor.ID}}',
-  testUrl: '/live/sensors/{{.Sensor.ID}}/test',
-  initialPoints: {{jsonJS .LiveOne.Points}}
-});
+  // app.js is deferred; run after DOMContentLoaded so it is defined.
+  document.addEventListener('DOMContentLoaded', function () {
+    if (!window.sensimulSensorDetail) return;
+    window.sensimulSensorDetail({
+      sensorId: '{{.Sensor.ID}}',
+      liveEventUrl: '/events/live',
+      testEventUrl: '/events/tests/{{.Sensor.ID}}',
+      testUrl: '/live/sensors/{{.Sensor.ID}}/test',
+      initialPoints: {{jsonJS .LiveOne.Points}}
+    });
+  });
 </script>
 {{template "footer" .}}
 {{end}}
