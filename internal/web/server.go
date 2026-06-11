@@ -637,6 +637,10 @@ func (s *Server) sse(w http.ResponseWriter, r *http.Request, subscribe func() (c
 		return
 	}
 
+	// SSE streams are long-lived; the server's WriteTimeout would otherwise close
+	// the connection (default 30s), causing periodic drops/reconnects.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+
 	ch, cancel := subscribe()
 	defer cancel()
 
@@ -669,7 +673,28 @@ func parseTemplates() (*template.Template, error) {
 	if err != nil {
 		return nil, err
 	}
-	return template.ParseFS(root, "*.html")
+	return template.New("sensimul").Funcs(templateFuncs()).ParseFS(root, "*.html")
+}
+
+func templateFuncs() template.FuncMap {
+	return template.FuncMap{
+		// fmtTime renders a wall-clock time for initial server render; the JS
+		// then keeps it live. Zero time (no telemetry yet) shows a dash.
+		"fmtTime": func(t time.Time) string {
+			if t.IsZero() {
+				return "–"
+			}
+			return t.Local().Format("15:04:05")
+		},
+		// jsonJS marshals a value for safe embedding inside a <script> block.
+		"jsonJS": func(v any) (template.JS, error) {
+			b, err := json.Marshal(v)
+			if err != nil {
+				return "", err
+			}
+			return template.JS(b), nil
+		},
+	}
 }
 
 func readAssetText(path string) (string, error) {

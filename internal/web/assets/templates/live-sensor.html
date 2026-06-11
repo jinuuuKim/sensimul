@@ -11,7 +11,8 @@
 
 <div class="card">
   <h3>Live Graph</h3>
-  <svg id="sensor-chart" class="chart" viewBox="0 0 800 220"></svg>
+  <p class="muted">Most recent {{len .LiveOne.Points}} sample(s). Updates in real time.</p>
+  <svg id="sensor-chart" class="chart" viewBox="0 0 800 220" preserveAspectRatio="none"></svg>
 </div>
 
 <script>
@@ -19,7 +20,8 @@ window.sensimulSensorDetail && window.sensimulSensorDetail({
   sensorId: '{{.Sensor.ID}}',
   liveEventUrl: '/events/live',
   testEventUrl: '/events/tests/{{.Sensor.ID}}',
-  testUrl: '/live/sensors/{{.Sensor.ID}}/test'
+  testUrl: '/live/sensors/{{.Sensor.ID}}/test',
+  initialPoints: {{jsonJS .LiveOne.Points}}
 });
 </script>
 {{template "footer" .}}

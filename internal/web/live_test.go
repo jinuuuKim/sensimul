@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,8 +11,42 @@ import (
 	"time"
 
 	"github.com/sensimul/sensimul/internal/config"
+	"github.com/sensimul/sensimul/internal/domain"
 	"github.com/sensimul/sensimul/internal/persistence/sqlite"
 )
+
+func TestTemplatesParseAndRender(t *testing.T) {
+	tpls, err := parseTemplates()
+	if err != nil {
+		t.Fatalf("parse templates: %v", err)
+	}
+
+	unit := "°C"
+	reading := SensorLiveReading{
+		SiteID: "S1", SensorID: "TEMP_1", SensorType: "temperature",
+		Value: 21.5, Unit: &unit, Status: "normal", LastUpdated: time.Now().UTC(),
+		Points: []SensorPoint{{At: time.Now().UTC(), Value: 21.4}, {At: time.Now().UTC(), Value: 21.5}},
+	}
+
+	cases := []struct {
+		name string
+		data viewData
+	}{
+		{"live", viewData{Title: "Live", Live: []SensorLiveReading{reading}, StaleAfter: 10 * time.Second, RuntimeTickInterval: "5s"}},
+		{"live", viewData{Title: "Live"}}, // empty -> placeholder branch
+		{"live-sensor", viewData{Title: "Sensor", Sensor: &domain.Sensor{ID: "TEMP_1", SiteID: "S1", SensorType: "temperature"}, LiveOne: &reading, StaleAfter: 10 * time.Second}},
+	}
+
+	for _, c := range cases {
+		var buf bytes.Buffer
+		if err := tpls.ExecuteTemplate(&buf, c.name, c.data); err != nil {
+			t.Fatalf("render %q: %v", c.name, err)
+		}
+		if buf.Len() == 0 {
+			t.Fatalf("render %q produced empty output", c.name)
+		}
+	}
+}
 
 func TestMarkStale(t *testing.T) {
 	now := time.Now().UTC()

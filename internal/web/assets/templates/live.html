@@ -10,18 +10,19 @@
     <button type="submit">Save Interval</button>
   </form>
   <table id="live-table">
-    <thead><tr><th>Sensor</th><th>Type</th><th>Value</th><th>Status</th><th>Updated</th></tr></thead>
+    <thead><tr><th>Site</th><th>Sensor</th><th>Type</th><th>Value</th><th>Status</th><th>Updated</th></tr></thead>
     <tbody>
     {{range .Live}}
       <tr data-sensor-id="{{.SensorID}}">
+        <td>{{.SiteID}}</td>
         <td><a href="/live/sensors/{{.SensorID}}">{{.SensorID}}</a></td>
         <td>{{.SensorType}}</td>
         <td class="value">{{printf "%.3f" .Value}}</td>
         <td class="status">{{.Status}}</td>
-        <td class="updated">{{.LastUpdated}}</td>
+        <td class="updated">{{fmtTime .LastUpdated}}</td>
       </tr>
     {{else}}
-      <tr><td colspan="5">No live data yet. Waiting for telemetry...</td></tr>
+      <tr data-placeholder><td colspan="6">No live data yet. Waiting for telemetry…</td></tr>
     {{end}}
     </tbody>
   </table>
