@@ -8,18 +8,21 @@ import (
 	"time"
 )
 
-// The weather Client is shared across concurrent per-site simulation loops, so
-// concurrent Get() must be race-free. Run with -race.
+// The weather Client is shared across concurrent per-site simulation loops, each
+// requesting its own station, so concurrent GetForStation across distinct
+// stations (the per-station cache map) must be race-free. Run with -race.
 func TestClientConcurrentGet(t *testing.T) {
-	c := NewClient(ModeSynthetic, "", "", "", time.Minute, time.Second)
+	c := NewClient(ModeSynthetic, "", "", "108", time.Minute, time.Second)
+	stations := []string{"108", "159", "143", "", "112"}
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
+		station := stations[i%len(stations)]
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 50; j++ {
-				if _, err := c.Get(); err != nil {
-					t.Errorf("get: %v", err)
+				if _, err := c.GetForStation(station); err != nil {
+					t.Errorf("get %q: %v", station, err)
 				}
 			}
 		}()
