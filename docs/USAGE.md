@@ -55,6 +55,10 @@ All commands support `--config` (default: `config/sensimul.yaml`).
 ./build/sensimul run --config config/sensimul.yaml
 ```
 
+With `site_id` empty (the default) **every site runs concurrently**, each on its
+own MQTT client id (`<client_id>-<site_id>`). Set `site_id` (or
+`SENSIMUL_SITE_ID`) to run a single site only.
+
 MQTT topic format:
 
 ```text

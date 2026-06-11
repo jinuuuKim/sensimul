@@ -3,9 +3,29 @@ package weather
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 )
+
+// The weather Client is shared across concurrent per-site simulation loops, so
+// concurrent Get() must be race-free. Run with -race.
+func TestClientConcurrentGet(t *testing.T) {
+	c := NewClient(ModeSynthetic, "", "", "", time.Minute, time.Second)
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				if _, err := c.Get(); err != nil {
+					t.Errorf("get: %v", err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
 
 func TestSyntheticModeReturnsBaseline(t *testing.T) {
 	c := NewClient(ModeSynthetic, "", "", "", time.Minute, time.Second)
