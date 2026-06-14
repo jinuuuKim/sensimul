@@ -156,6 +156,38 @@ func (p *Publisher) PublishTestResult(ctx context.Context, result SensorTestResu
 	return nil
 }
 
+// PublishControllerAck publishes a command ACK back to the API server.
+func (p *Publisher) PublishControllerAck(ctx context.Context, siteID, controllerID string, ack ControllerCommandAck) error {
+	if p == nil {
+		return nil
+	}
+	if p.client == nil || !p.client.IsConnectionOpen() {
+		return fmt.Errorf("mqtt not connected")
+	}
+
+	body, err := json.Marshal(ack)
+	if err != nil {
+		return fmt.Errorf("marshal controller ack: %w", err)
+	}
+
+	topic := TopicControllerAck(siteID, controllerID)
+	token := p.client.Publish(topic, p.opts.QoS, false, body)
+	if !token.WaitTimeout(5 * time.Second) {
+		return fmt.Errorf("mqtt publish timeout: %s", topic)
+	}
+	if err := token.Error(); err != nil {
+		return err
+	}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	return nil
+}
+
 func (p *Publisher) Subscribe(ctx context.Context, topic string, handler func(topic string, payload []byte)) error {
 	if p == nil {
 		return nil

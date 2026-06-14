@@ -21,6 +21,23 @@ type SensorTestResult struct {
 	RespondedAt string  `json:"responded_at"`
 }
 
+// ControllerCommand is published by the API server to drive a controller.
+type ControllerCommand struct {
+	CorrelationID string `json:"correlationId"`
+	SiteID        string `json:"siteId"`
+	ControllerID  string `json:"controllerId"`
+	Status        string `json:"status"`
+	OutputLevel   *int   `json:"outputLevel"`
+}
+
+// ControllerCommandAck is published by the simulator after applying (or rejecting) a command.
+type ControllerCommandAck struct {
+	CorrelationID string `json:"correlationId"`
+	ResultStatus  string `json:"resultStatus"`
+	ResultCode    string `json:"resultCode"`
+	Message       string `json:"message"`
+}
+
 func NewSensorTestRequest(siteID, sensorID string) SensorTestRequest {
 	return SensorTestRequest{
 		SiteID:    siteID,

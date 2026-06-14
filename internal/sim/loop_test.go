@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sensimul/sensimul/internal/domain"
+	"github.com/sensimul/sensimul/internal/mqtt"
 	"github.com/sensimul/sensimul/internal/persistence/sqlite"
 	"github.com/sensimul/sensimul/internal/weather"
 )
@@ -148,6 +149,60 @@ func TestIndoorControllerOverridesWeather(t *testing.T) {
 
 func newLoopWith(state *State, siteID string) *Loop {
 	return NewLoop(state, LoopConfig{TickInterval: time.Second}, nil, nil, nil, nil, siteID)
+}
+
+func TestApplyControllerCommandUpdatesStateAndPersists(t *testing.T) {
+	repo, err := sqlite.New(filepath.Join(t.TempDir(), "sensimul.db"))
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	site := domain.NewSite("S1", "Site1", domain.SiteTypeIndoor, 37.5, 126.9)
+	if err := repo.CreateSite(site); err != nil {
+		t.Fatalf("create site: %v", err)
+	}
+	ctrl, err := domain.NewController("COOL1", site.ID, domain.Cooling, domain.SiteTypeIndoor)
+	if err != nil {
+		t.Fatalf("new controller: %v", err)
+	}
+	if err := repo.CreateController(ctrl); err != nil {
+		t.Fatalf("create controller: %v", err)
+	}
+
+	state := NewState(site, 1)
+	state.AddController(ctrl)
+	// publisher nil -> ACK publishing is a no-op (nil-safe), apply + persist still run.
+	loop := NewLoop(state, LoopConfig{TickInterval: time.Second}, nil, nil, nil, repo, site.ID)
+
+	level := 70
+	loop.applyControllerCommand(mqtt.ControllerCommand{
+		CorrelationID: "c1", SiteID: site.ID, ControllerID: "COOL1",
+		Status: "on", OutputLevel: &level,
+	})
+
+	if state.Controllers[0].Status != domain.ControllerStatusOn || state.Controllers[0].OutputLevel != 70 {
+		t.Fatalf("state not updated: status=%s level=%d",
+			state.Controllers[0].Status, state.Controllers[0].OutputLevel)
+	}
+	persisted, err := repo.GetController("COOL1")
+	if err != nil {
+		t.Fatalf("get controller: %v", err)
+	}
+	if persisted.Status != domain.ControllerStatusOn || persisted.OutputLevel != 70 {
+		t.Fatalf("not persisted: status=%s level=%d", persisted.Status, persisted.OutputLevel)
+	}
+}
+
+func TestApplyControllerCommandRejectsUnknownController(t *testing.T) {
+	site := domain.NewSite("S1", "Site1", domain.SiteTypeIndoor, 37.5, 126.9)
+	state := NewState(site, 1)
+	loop := NewLoop(state, LoopConfig{TickInterval: time.Second}, nil, nil, nil, nil, site.ID)
+
+	// No controller in state, publisher nil -> should not panic, just no-op ack.
+	loop.applyControllerCommand(mqtt.ControllerCommand{
+		CorrelationID: "c2", SiteID: site.ID, ControllerID: "GHOST", Status: "on",
+	})
 }
 
 func stepParticulate(loop *Loop, state *State, n int) {

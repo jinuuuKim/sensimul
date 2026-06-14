@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,6 +46,7 @@ type Loop struct {
 	cancel              context.CancelFunc
 	wg                  sync.WaitGroup
 	testReqCh           chan mqtt.SensorTestRequest
+	commandCh           chan mqtt.ControllerCommand
 	repo                *sqlite.Repository
 	siteID              string
 	configCheckInterval time.Duration
@@ -69,6 +71,7 @@ func NewLoop(state *State, cfg LoopConfig, clk clock.Clock, publisher *mqtt.Publ
 		logger:              logger,
 		cfg:                 cfg,
 		testReqCh:           make(chan mqtt.SensorTestRequest, 64),
+		commandCh:           make(chan mqtt.ControllerCommand, 64),
 		repo:                repo,
 		siteID:              siteID,
 		configCheckInterval: 2 * time.Second,
@@ -88,6 +91,10 @@ func (l *Loop) Start(ctx context.Context) error {
 
 	if err := l.subscribeTestRequests(); err != nil {
 		l.logger.Warn().Err(err).Msg("test request subscription failed")
+	}
+
+	if err := l.subscribeControllerCommands(); err != nil {
+		l.logger.Warn().Err(err).Msg("controller command subscription failed")
 	}
 
 	tickInterval, err := l.runtimeTickInterval()
@@ -212,6 +219,7 @@ func (l *Loop) tick() error {
 		}
 	}
 
+	l.processControllerCommands()
 	l.resolveControllers()
 	l.resolveParticulate()
 	l.applyWindEffects()
@@ -307,6 +315,112 @@ func (l *Loop) processTestRequests() {
 			return
 		}
 	}
+}
+
+func (l *Loop) subscribeControllerCommands() error {
+	if l.publisher == nil {
+		return nil
+	}
+
+	return l.publisher.Subscribe(l.ctx, mqtt.TopicControllerCommandFilter(), func(topic string, body []byte) {
+		siteID, controllerID, ok := mqtt.ParseControllerCommandTopic(topic)
+		if !ok || siteID != l.state.Site.ID {
+			return
+		}
+
+		var cmd mqtt.ControllerCommand
+		if err := json.Unmarshal(body, &cmd); err != nil {
+			l.logger.Warn().Err(err).Str("topic", topic).Msg("invalid controller command payload")
+			return
+		}
+
+		if cmd.SiteID == "" {
+			cmd.SiteID = siteID
+		}
+		if cmd.ControllerID == "" {
+			cmd.ControllerID = controllerID
+		}
+
+		select {
+		case l.commandCh <- cmd:
+		default:
+			l.logger.Warn().Str("controller_id", cmd.ControllerID).Msg("controller command dropped: queue full")
+		}
+	})
+}
+
+// processControllerCommands drains queued commands, applies status/output to the controller,
+// persists it, and publishes an ACK keyed by the command's correlation id.
+func (l *Loop) processControllerCommands() {
+	if l.publisher == nil {
+		return
+	}
+
+	for {
+		select {
+		case cmd := <-l.commandCh:
+			l.applyControllerCommand(cmd)
+		default:
+			return
+		}
+	}
+}
+
+func (l *Loop) applyControllerCommand(cmd mqtt.ControllerCommand) {
+	controller := l.findController(cmd.ControllerID)
+	if controller == nil {
+		l.publishCommandAck(cmd, "FAILED", "NOT_FOUND", "controller not found: "+cmd.ControllerID)
+		return
+	}
+
+	status := domain.ControllerStatus(strings.ToLower(cmd.Status))
+	if status != domain.ControllerStatusOn && status != domain.ControllerStatusOff {
+		l.publishCommandAck(cmd, "FAILED", "INVALID_STATUS", "status must be on|off")
+		return
+	}
+	if cmd.OutputLevel != nil && (*cmd.OutputLevel < 0 || *cmd.OutputLevel > 100) {
+		l.publishCommandAck(cmd, "FAILED", "INVALID_OUTPUT", "outputLevel must be 0-100")
+		return
+	}
+
+	controller.Status = status
+	if cmd.OutputLevel != nil {
+		controller.OutputLevel = *cmd.OutputLevel
+	}
+
+	if err := l.repo.UpdateController(controller); err != nil {
+		l.logger.Warn().Err(err).Str("controller_id", cmd.ControllerID).Msg("failed to persist controller command")
+		l.publishCommandAck(cmd, "FAILED", "PERSIST_ERROR", err.Error())
+		return
+	}
+
+	l.logger.Info().
+		Str("controller_id", controller.ID).
+		Str("status", string(controller.Status)).
+		Int("output_level", controller.OutputLevel).
+		Msg("controller command applied")
+	l.publishCommandAck(cmd, "APPLIED", "OK", "")
+}
+
+func (l *Loop) publishCommandAck(cmd mqtt.ControllerCommand, resultStatus, resultCode, message string) {
+	ack := mqtt.ControllerCommandAck{
+		CorrelationID: cmd.CorrelationID,
+		ResultStatus:  resultStatus,
+		ResultCode:    resultCode,
+		Message:       message,
+	}
+	if err := l.publisher.PublishControllerAck(l.ctx, cmd.SiteID, cmd.ControllerID, ack); err != nil {
+		l.logger.Warn().Err(err).Str("controller_id", cmd.ControllerID).Msg("failed to publish controller ack")
+	}
+}
+
+func (l *Loop) findController(controllerID string) *domain.Controller {
+	for _, controller := range l.state.Controllers {
+		if controller.ID == controllerID {
+			return controller
+		}
+	}
+	return nil
 }
 
 func (l *Loop) findSensor(sensorID string) *domain.Sensor {

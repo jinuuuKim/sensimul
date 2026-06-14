@@ -37,6 +37,33 @@ func TopicTestResultFilter() string {
 	return fmt.Sprintf("%s/tests/results/sites/+/sensors/+", topicBase)
 }
 
+// TopicControllerCommand returns the controller command topic the API server publishes to.
+func TopicControllerCommand(siteID, controllerID string) string {
+	return fmt.Sprintf("%s/sites/%s/controllers/%s/commands", topicBase, siteID, controllerID)
+}
+
+// TopicControllerCommandFilter matches all incoming controller commands.
+func TopicControllerCommandFilter() string {
+	return fmt.Sprintf("%s/sites/+/controllers/+/commands", topicBase)
+}
+
+// TopicControllerAck returns the controller command ACK topic the simulator publishes to.
+func TopicControllerAck(siteID, controllerID string) string {
+	return fmt.Sprintf("%s/sites/%s/controllers/%s/acks", topicBase, siteID, controllerID)
+}
+
+// ParseControllerCommandTopic extracts site/controller ids from a command topic.
+func ParseControllerCommandTopic(topic string) (siteID, controllerID string, ok bool) {
+	parts := strings.Split(topic, "/")
+	if len(parts) != 6 {
+		return "", "", false
+	}
+	if parts[0] != topicBase || parts[1] != "sites" || parts[3] != "controllers" || parts[5] != "commands" {
+		return "", "", false
+	}
+	return parts[2], parts[4], true
+}
+
 func ParseLiveTopic(topic string) (siteID, sensorID string, ok bool) {
 	parts := strings.Split(topic, "/")
 	if len(parts) != 5 {
