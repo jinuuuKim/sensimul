@@ -27,7 +27,7 @@ const (
 	indoorOffsetPM10 = 10.0 // 실내는 실외보다 이만큼 낮게 수렴 (off 상태)
 
 	pmRateBase = 0.05 // 기본 수렴 속도 (실외)
-	pmRateFast = 0.30 // 디바이스 ON 시 빠른 수렴
+	pmRateFast = 0.15 // 디바이스 ON 시 빠른 수렴 (컨트롤러 변동 50%로 완화, was 0.30; dt=5s 오버슈트도 해소)
 	pmRateSlow = 0.01 // 실내 OFF 시 천천히 수렴
 
 	humidityBaseK  = 0.05 // 습도 기본 수렴 속도 (physics.NewHumidity와 일치)
@@ -53,6 +53,9 @@ type Loop struct {
 	lastConfigCheck     time.Time
 	defaultTickInterval time.Duration
 	weatherInitialized  bool
+	// conflictActive tracks per-axis controller conflicts so the warning is logged
+	// on transition only, not every tick of a long-running stable conflict.
+	conflictActive map[domain.TargetAxis]bool
 }
 
 type LoopConfig struct {
@@ -76,6 +79,7 @@ func NewLoop(state *State, cfg LoopConfig, clk clock.Clock, publisher *mqtt.Publ
 		siteID:              siteID,
 		configCheckInterval: 2 * time.Second,
 		lastConfigCheck:     time.Now(),
+		conflictActive:      make(map[domain.TargetAxis]bool),
 		defaultTickInterval: cfg.TickInterval,
 	}
 }
@@ -385,7 +389,10 @@ func (l *Loop) applyControllerCommand(cmd mqtt.ControllerCommand) {
 
 	controller.Status = status
 	if cmd.OutputLevel != nil {
+		// An explicit output via MQTT is a manual override: drop target mode so the
+		// control loop stops recomputing over it.
 		controller.OutputLevel = *cmd.OutputLevel
+		controller.HasTarget = false
 	}
 
 	if err := l.repo.UpdateController(controller); err != nil {
@@ -489,35 +496,112 @@ func (l *Loop) refreshWeather() error {
 	return err
 }
 
+// resolveControllers drives the temperature and humidity engines from the
+// controllers' state each tick. In target mode the output is computed
+// feed-forward from the current weather ambient (Controller.RequiredOutput); in
+// legacy mode the operator-set OutputLevel is used directly. Conflicting devices
+// on the same axis (cooling↔heating, humidify↔dehumidify) are arbitrated by
+// resolveAxis so they never fight. Air-quality controllers
+// (ventilation/air_purifier) are handled separately in resolveParticulate.
 func (l *Loop) resolveControllers() {
-	activeControllers := make(map[domain.TargetAxis]bool)
-
-	for _, ctrl := range l.state.Controllers {
-		if ctrl.Status == domain.ControllerStatusOn && ctrl.OutputLevel > 0 {
-			power := float64(ctrl.OutputLevel) / 10
-			switch ctrl.Type {
-			case domain.Cooling:
-				l.state.TempEngine.SetCooling(power)
-			case domain.Heating:
-				l.state.TempEngine.SetHeating(power)
-			case domain.Humidifying:
-				l.state.HumidityEngine.SetHumidifying(power)
-			case domain.Dehumidifying:
-				l.state.HumidityEngine.SetDehumidifying(power)
-			case domain.Ventilation, domain.AirPurifier:
-				// Air-quality controllers drive PM ambient in resolveParticulate.
-			}
-			activeControllers[ctrl.TargetAxis] = true
+	if tempWinner := l.resolveAxis(domain.AxisTemperature, l.state.TempEngine.Ambient); tempWinner != nil {
+		// 컨트롤러로 인한 온도 상승·하강을 50%로 완화 (was /10).
+		power := float64(tempWinner.OutputLevel) / 20
+		switch tempWinner.Type {
+		case domain.Cooling:
+			l.state.TempEngine.SetCooling(power)
+			l.state.TempEngine.SetHeating(0)
+		case domain.Heating:
+			l.state.TempEngine.SetHeating(power)
+			l.state.TempEngine.SetCooling(0)
 		}
-	}
-
-	if !activeControllers[domain.AxisTemperature] {
+	} else {
 		l.state.TempEngine.SetCooling(0)
 		l.state.TempEngine.SetHeating(0)
 	}
-	if !activeControllers[domain.AxisHumidity] {
+
+	if humidWinner := l.resolveAxis(domain.AxisHumidity, l.state.HumidityEngine.Ambient); humidWinner != nil {
+		power := float64(humidWinner.OutputLevel) / 20
+		switch humidWinner.Type {
+		case domain.Humidifying:
+			l.state.HumidityEngine.SetHumidifying(power)
+			l.state.HumidityEngine.SetDehumidifying(0)
+		case domain.Dehumidifying:
+			l.state.HumidityEngine.SetDehumidifying(power)
+			l.state.HumidityEngine.SetHumidifying(0)
+		}
+	} else {
 		l.state.HumidityEngine.SetHumidifying(0)
 		l.state.HumidityEngine.SetDehumidifying(0)
+	}
+}
+
+// resolveAxis selects the single controller that should drive the given axis this
+// tick and returns it (nil when nothing should act). Among the ON controllers on
+// the axis it computes each one's demanded output and picks the most-demanded,
+// guaranteeing that an opposing pair never both act. For target-mode controllers
+// it refreshes the persisted display output (winner = its required value, others
+// idle at 0); legacy controllers' stored OutputLevel is never overwritten here.
+func (l *Loop) resolveAxis(axis domain.TargetAxis, ambient float64) *domain.Controller {
+	demand := func(c *domain.Controller) int {
+		if c.Status != domain.ControllerStatusOn {
+			return 0
+		}
+		if c.HasTarget {
+			return c.RequiredOutput(ambient)
+		}
+		return c.OutputLevel
+	}
+
+	var winner *domain.Controller
+	activeCount := 0
+	for _, ctrl := range l.state.Controllers {
+		if ctrl.TargetAxis != axis {
+			continue
+		}
+		if demand(ctrl) > 0 {
+			activeCount++
+			if winner == nil || demand(ctrl) > demand(winner) {
+				winner = ctrl
+			}
+		}
+	}
+
+	conflict := activeCount > 1
+	if conflict && !l.conflictActive[axis] {
+		l.logger.Warn().
+			Str("axis", string(axis)).
+			Str("winner", winner.ID).
+			Msg("conflicting controllers on axis; honoring the most-demanded one, idling the rest")
+	}
+	l.conflictActive[axis] = conflict
+
+	// Refresh persisted display output for target-mode controllers on this axis.
+	for _, ctrl := range l.state.Controllers {
+		if ctrl.TargetAxis != axis || !ctrl.HasTarget {
+			continue
+		}
+		if ctrl == winner {
+			l.setControllerOutput(ctrl, demand(ctrl))
+		} else {
+			l.setControllerOutput(ctrl, 0)
+		}
+	}
+
+	return winner
+}
+
+// setControllerOutput updates the in-memory computed output and persists it when
+// it changes, without touching operator-owned fields (status/target).
+func (l *Loop) setControllerOutput(ctrl *domain.Controller, level int) {
+	if ctrl.OutputLevel == level {
+		return
+	}
+	ctrl.OutputLevel = level
+	if l.repo != nil {
+		if err := l.repo.UpdateControllerOutput(ctrl.ID, level); err != nil {
+			l.logger.Warn().Err(err).Str("controller_id", ctrl.ID).Msg("failed to persist computed output")
+		}
 	}
 }
 

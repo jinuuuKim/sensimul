@@ -147,6 +147,176 @@ func TestIndoorControllerOverridesWeather(t *testing.T) {
 	}
 }
 
+// settleTemp runs the controller resolution + temperature step to equilibrium.
+func settleTemp(loop *Loop, state *State) {
+	for i := 0; i < 800; i++ {
+		loop.resolveControllers()
+		state.TempEngine.Step(1.0)
+	}
+}
+
+func TestTargetModeCoolingHoldsSetpoint(t *testing.T) {
+	site := domain.NewSite("IN_T1", "Indoor", domain.SiteTypeIndoor, 37.5, 126.9)
+	state := NewState(site, 1)
+	state.TempEngine.NoiseSigma = 0
+
+	cooler, _ := domain.NewController("COOL1", site.ID, domain.Cooling, domain.SiteTypeIndoor)
+	cooler.Status = domain.ControllerStatusOn
+	cooler.TargetValue = 22.0
+	cooler.HasTarget = true
+	state.AddController(cooler)
+
+	wc := weather.NewClient(weather.ModeSynthetic, "", "", "", time.Minute, time.Second)
+	wc.SetCache(&weather.Weather{TemperatureC: 30.0, HumidityPct: 40.0, PressureHPA: 1009.0})
+	loop := NewLoop(state, LoopConfig{TickInterval: time.Second}, nil, nil, wc, nil, site.ID)
+	_ = loop.refreshWeather()
+
+	settleTemp(loop, state)
+
+	if math.Abs(state.TempEngine.Current-22.0) > 0.6 {
+		t.Fatalf("target-mode cooler settled at %.2f, want ~22.0", state.TempEngine.Current)
+	}
+	// Output was computed feed-forward from the 30°C ambient: 2*(30-22) = 16.
+	if state.Controllers[0].OutputLevel != 16 {
+		t.Fatalf("computed output = %d, want 16", state.Controllers[0].OutputLevel)
+	}
+}
+
+func TestTargetModeHeatingHoldsSetpoint(t *testing.T) {
+	site := domain.NewSite("IN_T2", "Indoor", domain.SiteTypeIndoor, 37.5, 126.9)
+	state := NewState(site, 1)
+	state.TempEngine.NoiseSigma = 0
+
+	heater, _ := domain.NewController("HEAT1", site.ID, domain.Heating, domain.SiteTypeIndoor)
+	heater.Status = domain.ControllerStatusOn
+	heater.TargetValue = 26.0
+	heater.HasTarget = true
+	state.AddController(heater)
+
+	wc := weather.NewClient(weather.ModeSynthetic, "", "", "", time.Minute, time.Second)
+	wc.SetCache(&weather.Weather{TemperatureC: 15.0, HumidityPct: 40.0, PressureHPA: 1009.0})
+	loop := NewLoop(state, LoopConfig{TickInterval: time.Second}, nil, nil, wc, nil, site.ID)
+	_ = loop.refreshWeather()
+
+	settleTemp(loop, state)
+
+	if math.Abs(state.TempEngine.Current-26.0) > 0.6 {
+		t.Fatalf("target-mode heater settled at %.2f, want ~26.0", state.TempEngine.Current)
+	}
+}
+
+func TestTargetModeConflictHonorsMostDemanded(t *testing.T) {
+	site := domain.NewSite("IN_T3", "Indoor", domain.SiteTypeIndoor, 37.5, 126.9)
+	state := NewState(site, 1)
+	state.TempEngine.NoiseSigma = 0
+
+	// Both ON with opposing setpoints. At ambient 30 the cooler demands
+	// 2*(30-20)=20 while the heater demands 2*(24-30)<0 -> 0, so the cooler wins
+	// and the heater idles (no fighting).
+	cooler, _ := domain.NewController("COOL1", site.ID, domain.Cooling, domain.SiteTypeIndoor)
+	cooler.Status, cooler.TargetValue, cooler.HasTarget = domain.ControllerStatusOn, 20.0, true
+	heater, _ := domain.NewController("HEAT1", site.ID, domain.Heating, domain.SiteTypeIndoor)
+	heater.Status, heater.TargetValue, heater.HasTarget = domain.ControllerStatusOn, 24.0, true
+	state.AddController(cooler)
+	state.AddController(heater)
+
+	wc := weather.NewClient(weather.ModeSynthetic, "", "", "", time.Minute, time.Second)
+	wc.SetCache(&weather.Weather{TemperatureC: 30.0, HumidityPct: 40.0, PressureHPA: 1009.0})
+	loop := NewLoop(state, LoopConfig{TickInterval: time.Second}, nil, nil, wc, nil, site.ID)
+	_ = loop.refreshWeather()
+
+	settleTemp(loop, state)
+
+	if math.Abs(state.TempEngine.Current-20.0) > 0.6 {
+		t.Fatalf("conflict: temp settled at %.2f, want cooler's ~20.0", state.TempEngine.Current)
+	}
+	// The losing heater must idle at 0 output.
+	for _, c := range state.Controllers {
+		if c.ID == "HEAT1" && c.OutputLevel != 0 {
+			t.Fatalf("losing heater output = %d, want 0", c.OutputLevel)
+		}
+	}
+}
+
+func TestTargetModeComputedOutputPersisted(t *testing.T) {
+	repo, err := sqlite.New(filepath.Join(t.TempDir(), "sensimul.db"))
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	site := domain.NewSite("S1", "Site1", domain.SiteTypeIndoor, 37.5, 126.9)
+	if err := repo.CreateSite(site); err != nil {
+		t.Fatalf("create site: %v", err)
+	}
+	cooler, _ := domain.NewController("COOL1", site.ID, domain.Cooling, domain.SiteTypeIndoor)
+	cooler.Status, cooler.TargetValue, cooler.HasTarget = domain.ControllerStatusOn, 22.0, true
+	if err := repo.CreateController(cooler); err != nil {
+		t.Fatalf("create controller: %v", err)
+	}
+
+	state := NewState(site, 1)
+	state.AddController(cooler)
+	wc := weather.NewClient(weather.ModeSynthetic, "", "", "", time.Minute, time.Second)
+	wc.SetCache(&weather.Weather{TemperatureC: 30.0, HumidityPct: 40.0, PressureHPA: 1009.0})
+	loop := NewLoop(state, LoopConfig{TickInterval: time.Second}, nil, nil, wc, repo, site.ID)
+	_ = loop.refreshWeather()
+
+	loop.resolveControllers()
+
+	persisted, err := repo.GetController("COOL1")
+	if err != nil {
+		t.Fatalf("get controller: %v", err)
+	}
+	// 2*(30-22) = 16, and target fields round-trip through the new columns.
+	if persisted.OutputLevel != 16 || !persisted.HasTarget || persisted.TargetValue != 22.0 {
+		t.Fatalf("persisted = {output:%d hasTarget:%v target:%.1f}, want {16 true 22.0}",
+			persisted.OutputLevel, persisted.HasTarget, persisted.TargetValue)
+	}
+}
+
+// TestTargetModeThroughReloadPath exercises the real production path: the
+// controller is loaded from the DB via ListControllers and installed with
+// UpdateControllers (as reloadConfiguration does every 2s), not hand-built in
+// memory. This guards the scan/round-trip the live loop actually depends on.
+func TestTargetModeThroughReloadPath(t *testing.T) {
+	repo, err := sqlite.New(filepath.Join(t.TempDir(), "sensimul.db"))
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+	t.Cleanup(func() { _ = repo.Close() })
+
+	site := domain.NewSite("S1", "Site1", domain.SiteTypeIndoor, 37.5, 126.9)
+	if err := repo.CreateSite(site); err != nil {
+		t.Fatalf("create site: %v", err)
+	}
+	cooler, _ := domain.NewController("COOL1", site.ID, domain.Cooling, domain.SiteTypeIndoor)
+	cooler.Status, cooler.TargetValue, cooler.HasTarget = domain.ControllerStatusOn, 22.0, true
+	if err := repo.CreateController(cooler); err != nil {
+		t.Fatalf("create controller: %v", err)
+	}
+
+	state := NewState(site, 1)
+	state.TempEngine.NoiseSigma = 0
+	// Install controllers exactly as reloadConfiguration does.
+	controllers, err := repo.ListControllers(site.ID)
+	if err != nil {
+		t.Fatalf("list controllers: %v", err)
+	}
+	state.UpdateControllers(controllers)
+
+	wc := weather.NewClient(weather.ModeSynthetic, "", "", "", time.Minute, time.Second)
+	wc.SetCache(&weather.Weather{TemperatureC: 30.0, HumidityPct: 40.0, PressureHPA: 1009.0})
+	loop := NewLoop(state, LoopConfig{TickInterval: time.Second}, nil, nil, wc, repo, site.ID)
+	_ = loop.refreshWeather()
+
+	settleTemp(loop, state)
+
+	if math.Abs(state.TempEngine.Current-22.0) > 0.6 {
+		t.Fatalf("reload-path target cooler settled at %.2f, want ~22.0", state.TempEngine.Current)
+	}
+}
+
 func newLoopWith(state *State, siteID string) *Loop {
 	return NewLoop(state, LoopConfig{TickInterval: time.Second}, nil, nil, nil, nil, siteID)
 }
@@ -216,6 +386,7 @@ func TestIndoorPurifierConvergesToCleanPM(t *testing.T) {
 	site := domain.NewSite("IN1", "Indoor", domain.SiteTypeIndoor, 37.5, 126.9)
 	state := NewState(site, 1)
 	state.Particulate.PM25, state.Particulate.PM10 = 120, 200 // dusty
+	state.Particulate.NoiseSigma = 0                          // deterministic steady state for convergence check
 
 	ap, err := domain.NewController("AP1", site.ID, domain.AirPurifier, domain.SiteTypeIndoor)
 	if err != nil {
@@ -237,6 +408,7 @@ func TestIndoorVentilationConvergesToOutdoorPM(t *testing.T) {
 	site := domain.NewSite("IN2", "Indoor", domain.SiteTypeIndoor, 37.5, 126.9)
 	state := NewState(site, 1)
 	state.Particulate.PM25, state.Particulate.PM10 = 5, 10 // start clean
+	state.Particulate.NoiseSigma = 0                       // deterministic steady state for convergence check
 	state.Weather = &WeatherSnapshot{PM10UgM3: 150, HasPM: true}
 
 	vent, err := domain.NewController("V1", site.ID, domain.Ventilation, domain.SiteTypeIndoor)
@@ -261,6 +433,7 @@ func TestIndoorVentilationConvergesToOutdoorPM(t *testing.T) {
 func TestIndoorOffConvergesToOutdoorMinusOffset(t *testing.T) {
 	site := domain.NewSite("IN3", "Indoor", domain.SiteTypeIndoor, 37.5, 126.9)
 	state := NewState(site, 1)
+	state.Particulate.NoiseSigma = 0 // deterministic steady state for convergence check
 	state.Weather = &WeatherSnapshot{PM10UgM3: 150, HasPM: true}
 
 	loop := newLoopWith(state, site.ID)

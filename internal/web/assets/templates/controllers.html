@@ -13,11 +13,13 @@
 </div>
 <div class="card">
   <table>
-    <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Output</th><th>Action</th></tr></thead>
+    <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Target</th><th>Output</th><th>Action</th></tr></thead>
     <tbody>
     {{range .Controllers}}
       <tr>
-        <td>{{.ID}}</td><td>{{.Type}}</td><td>{{.Status}}</td><td>{{.OutputLevel}}</td>
+        <td>{{.ID}}</td><td>{{.Type}}</td><td>{{.Status}}</td>
+        <td>{{if .HasTarget}}{{.TargetValue}}{{else}}—{{end}}</td>
+        <td>{{.OutputLevel}}</td>
         <td>
           <a href="/sites/{{$.Site.ID}}/controllers/{{.ID}}/edit">edit</a>
           <form method="post" action="/sites/{{$.Site.ID}}/controllers/{{.ID}}/delete" style="display:inline">
@@ -26,7 +28,7 @@
         </td>
       </tr>
     {{else}}
-      <tr><td colspan="5">No controllers configured.</td></tr>
+      <tr><td colspan="6">No controllers configured.</td></tr>
     {{end}}
     </tbody>
   </table>

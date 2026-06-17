@@ -8,9 +8,14 @@
       <option value="off" {{if eq .Controller.Status "off"}}selected{{end}}>off</option>
       <option value="on" {{if eq .Controller.Status "on"}}selected{{end}}>on</option>
     </select>
-    <input name="output_level" value="{{.Controller.OutputLevel}}" />
+    <input name="target_value" value="{{if .Controller.HasTarget}}{{.Controller.TargetValue}}{{end}}"
+           placeholder="목표 {{if eq .Controller.TargetAxis "temperature"}}온도(°C){{else}}습도(%){{end}}" />
     <button type="submit">Save</button>
   </form>
+  <p class="muted">
+    목표치를 입력하면 서버가 현재 날씨에 맞춰 출력을 자동 계산합니다(비우면 해제).
+    현재 적용 출력: <strong>{{.Controller.OutputLevel}}%</strong>{{if not .Controller.HasTarget}} (수동/미설정){{end}}
+  </p>
   <p><a href="/sites/{{.Controller.SiteID}}/controllers">← back</a></p>
 </div>
 {{template "footer" .}}

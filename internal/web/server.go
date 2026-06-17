@@ -496,11 +496,30 @@ func (s *Server) handleControllerUpdate(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	level, _ := strconv.Atoi(r.FormValue("output_level"))
 	status := r.FormValue("status")
-	ctrl.OutputLevel = level
 	if status != "" {
 		ctrl.Status = domain.ControllerStatus(status)
+	}
+
+	// Target mode: the operator enters a setpoint and the simulator computes the
+	// output feed-forward from the weather each tick. A blank field clears the
+	// target (the controller falls back to its last manual/legacy output).
+	if raw := strings.TrimSpace(r.FormValue("target_value")); raw != "" {
+		target, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			s.render(w, "controller-edit", viewData{Title: "Edit Controller", Path: "sites", Controller: ctrl, Error: "target must be a number", MqttReady: s.mqttReady})
+			return
+		}
+		ctrl.TargetValue = target
+		ctrl.HasTarget = true
+	} else {
+		ctrl.HasTarget = false
+	}
+
+	// When turned off, reset the displayed output so a stale computed value does
+	// not linger; the simulator owns it again once it is turned back on.
+	if ctrl.Status == domain.ControllerStatusOff {
+		ctrl.OutputLevel = 0
 	}
 
 	if err := s.repo.UpdateController(ctrl); err != nil {

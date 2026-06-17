@@ -45,12 +45,64 @@ const (
 )
 
 type Controller struct {
-	ID          string           `json:"id"`
-	SiteID      string           `json:"site_id"`
-	Type        ControllerType   `json:"type"`
-	TargetAxis  TargetAxis       `json:"target_axis"`
-	Status      ControllerStatus `json:"status"`
-	OutputLevel int              `json:"output_level"`
+	ID         string           `json:"id"`
+	SiteID     string           `json:"site_id"`
+	Type       ControllerType   `json:"type"`
+	TargetAxis TargetAxis       `json:"target_axis"`
+	Status     ControllerStatus `json:"status"`
+	// OutputLevel is the device output (0-100). In target mode it is computed by
+	// the simulator each tick (feed-forward from the weather ambient) and persisted
+	// for display; in legacy/manual mode it is set directly by the operator.
+	OutputLevel int `json:"output_level"`
+	// TargetValue is the operator's desired value on the controller's axis
+	// (temperature °C / humidity %). Honored only when HasTarget is true.
+	TargetValue float64 `json:"target_value"`
+	HasTarget   bool    `json:"has_target"`
+}
+
+// RequiredOutput computes the feed-forward output level (0-100) needed to hold
+// TargetValue given the current ambient (weather) value, by inverting the engine
+// equilibrium. Returns 0 when the controller is not needed in its own direction
+// (e.g. a cooler when the room is already at/below its target). When no target is
+// set it falls back to the manually configured OutputLevel.
+//
+// Equilibrium of the physics engines (see internal/sim/physics) with the
+// resolveControllers power mapping power = output/20:
+//
+//	cooling:       Eq = ambient - output/2   => output = 2*(ambient - target)
+//	heating:       Eq = ambient + output/2   => output = 2*(target - ambient)
+//	humidifying:   Eq = ambient + output     => output =   (target - ambient)
+//	dehumidifying: Eq = ambient - output     => output =   (ambient - target)
+//
+// The loop integration tests pin these to the real engines, so a physics-constant
+// change that breaks the inversion is caught there.
+func (c *Controller) RequiredOutput(ambient float64) int {
+	if !c.HasTarget {
+		return c.OutputLevel
+	}
+
+	var raw float64
+	switch c.Type {
+	case Cooling:
+		raw = 2 * (ambient - c.TargetValue)
+	case Heating:
+		raw = 2 * (c.TargetValue - ambient)
+	case Humidifying:
+		raw = c.TargetValue - ambient
+	case Dehumidifying:
+		raw = ambient - c.TargetValue
+	default:
+		// Air-quality controllers (ventilation/air_purifier) are not setpoint-driven.
+		return 0
+	}
+
+	if raw <= 0 {
+		return 0
+	}
+	if raw > 100 {
+		return 100
+	}
+	return int(raw + 0.5)
 }
 
 func NewController(id, siteID string, ctrlType ControllerType, siteType SiteType) (*Controller, error) {

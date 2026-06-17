@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS controllers (
     target_axis TEXT NOT NULL,
     status TEXT NOT NULL,
     output_level INTEGER NOT NULL DEFAULT 0,
+    target_value REAL NOT NULL DEFAULT 0,
+    has_target INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
 );
 
@@ -90,11 +92,21 @@ func (r *Repository) initSchema() error {
 }
 
 func (r *Repository) migrateSchema() error {
-	if _, err := r.db.Exec(`ALTER TABLE sites ADD COLUMN weather_station TEXT NOT NULL DEFAULT ''`); err != nil {
-		// SQLite reports "duplicate column name" after the first migration. Keep
-		// this lightweight so older DietPi databases can be upgraded in place.
-		if !strings.Contains(err.Error(), "duplicate column name") {
-			return fmt.Errorf("migrate sites.weather_station: %w", err)
+	// Idempotent in-place column additions for older DietPi databases. SQLite
+	// reports "duplicate column name" once the column already exists.
+	migrations := []struct {
+		name string
+		stmt string
+	}{
+		{"sites.weather_station", `ALTER TABLE sites ADD COLUMN weather_station TEXT NOT NULL DEFAULT ''`},
+		{"controllers.target_value", `ALTER TABLE controllers ADD COLUMN target_value REAL NOT NULL DEFAULT 0`},
+		{"controllers.has_target", `ALTER TABLE controllers ADD COLUMN has_target INTEGER NOT NULL DEFAULT 0`},
+	}
+	for _, m := range migrations {
+		if _, err := r.db.Exec(m.stmt); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column name") {
+				return fmt.Errorf("migrate %s: %w", m.name, err)
+			}
 		}
 	}
 	return nil
@@ -388,13 +400,15 @@ func (r *Repository) CreateController(ctrl *domain.Controller) error {
 	}
 
 	_, err := r.db.Exec(
-		`INSERT INTO controllers (id, site_id, type, target_axis, status, output_level) VALUES (?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO controllers (id, site_id, type, target_axis, status, output_level, target_value, has_target) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		ctrl.ID,
 		ctrl.SiteID,
 		string(ctrl.Type),
 		string(ctrl.TargetAxis),
 		string(ctrl.Status),
 		ctrl.OutputLevel,
+		ctrl.TargetValue,
+		boolToInt(ctrl.HasTarget),
 	)
 	if err != nil {
 		return fmt.Errorf("insert controller: %w", err)
@@ -404,7 +418,7 @@ func (r *Repository) CreateController(ctrl *domain.Controller) error {
 
 func (r *Repository) ListControllers(siteID string) ([]domain.Controller, error) {
 	rows, err := r.db.Query(
-		`SELECT id, site_id, type, target_axis, status, output_level FROM controllers WHERE site_id = ? ORDER BY id`,
+		`SELECT id, site_id, type, target_axis, status, output_level, target_value, has_target FROM controllers WHERE site_id = ? ORDER BY id`,
 		siteID,
 	)
 	if err != nil {
@@ -415,9 +429,11 @@ func (r *Repository) ListControllers(siteID string) ([]domain.Controller, error)
 	items := make([]domain.Controller, 0)
 	for rows.Next() {
 		var ctrl domain.Controller
-		if err := rows.Scan(&ctrl.ID, &ctrl.SiteID, &ctrl.Type, &ctrl.TargetAxis, &ctrl.Status, &ctrl.OutputLevel); err != nil {
+		var hasTarget int
+		if err := rows.Scan(&ctrl.ID, &ctrl.SiteID, &ctrl.Type, &ctrl.TargetAxis, &ctrl.Status, &ctrl.OutputLevel, &ctrl.TargetValue, &hasTarget); err != nil {
 			return nil, fmt.Errorf("scan controller: %w", err)
 		}
+		ctrl.HasTarget = hasTarget != 0
 		items = append(items, ctrl)
 	}
 
@@ -430,17 +446,19 @@ func (r *Repository) ListControllers(siteID string) ([]domain.Controller, error)
 
 func (r *Repository) GetController(id string) (*domain.Controller, error) {
 	row := r.db.QueryRow(
-		`SELECT id, site_id, type, target_axis, status, output_level FROM controllers WHERE id = ?`,
+		`SELECT id, site_id, type, target_axis, status, output_level, target_value, has_target FROM controllers WHERE id = ?`,
 		id,
 	)
 
 	var ctrl domain.Controller
-	if err := row.Scan(&ctrl.ID, &ctrl.SiteID, &ctrl.Type, &ctrl.TargetAxis, &ctrl.Status, &ctrl.OutputLevel); err != nil {
+	var hasTarget int
+	if err := row.Scan(&ctrl.ID, &ctrl.SiteID, &ctrl.Type, &ctrl.TargetAxis, &ctrl.Status, &ctrl.OutputLevel, &ctrl.TargetValue, &hasTarget); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("query controller: %w", err)
 	}
+	ctrl.HasTarget = hasTarget != 0
 
 	return &ctrl, nil
 }
@@ -451,9 +469,11 @@ func (r *Repository) UpdateController(ctrl *domain.Controller) error {
 	}
 
 	res, err := r.db.Exec(
-		`UPDATE controllers SET status = ?, output_level = ? WHERE id = ?`,
+		`UPDATE controllers SET status = ?, output_level = ?, target_value = ?, has_target = ? WHERE id = ?`,
 		string(ctrl.Status),
 		ctrl.OutputLevel,
+		ctrl.TargetValue,
+		boolToInt(ctrl.HasTarget),
 		ctrl.ID,
 	)
 	if err != nil {
@@ -469,6 +489,28 @@ func (r *Repository) UpdateController(ctrl *domain.Controller) error {
 	}
 
 	return nil
+}
+
+// UpdateControllerOutput persists only the computed output level. The simulator
+// calls this every time the feed-forward output changes, so it deliberately does
+// NOT touch status/target_value/has_target — those are owned by the operator (web
+// edit / MQTT command) and must not be clobbered by the control loop.
+func (r *Repository) UpdateControllerOutput(id string, outputLevel int) error {
+	if _, err := r.db.Exec(
+		`UPDATE controllers SET output_level = ? WHERE id = ?`,
+		outputLevel,
+		id,
+	); err != nil {
+		return fmt.Errorf("update controller output: %w", err)
+	}
+	return nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func (r *Repository) DeleteController(id string) error {
