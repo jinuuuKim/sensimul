@@ -19,7 +19,7 @@ func NewHumidity(initial float64) *HumidityEngine {
 		Current:    initial,
 		Ambient:    initial,
 		K:          0.05,
-		NoiseSigma: 0.1,
+		NoiseSigma: 0.03, // 인위적 노이즈 30%로 축소 (was 0.1)
 	}
 }
 
@@ -38,7 +38,7 @@ func (e *HumidityEngine) SetDehumidifying(power float64) {
 }
 
 func (e *HumidityEngine) Step(dt float64) float64 {
-	ambientVariation := (rand.Float64() - 0.5) * 0.3
+	ambientVariation := (rand.Float64() - 0.5) * 0.09 // 인위적 변동 30%로 축소 (was 0.3)
 	noise := (rand.Float64() - 0.5) * e.NoiseSigma * 2
 
 	// Relax toward the base/ambient humidity so the simulated value converges to

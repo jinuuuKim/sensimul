@@ -19,7 +19,7 @@ func NewTemperature(initial, ambient float64) *TemperatureEngine {
 		Current:    initial,
 		Ambient:    ambient,
 		K:          0.1,
-		NoiseSigma: 0.05,
+		NoiseSigma: 0.015, // 인위적 노이즈 30%로 축소 (was 0.05)
 	}
 }
 
@@ -40,7 +40,7 @@ func (e *TemperatureEngine) SetHeating(power float64) {
 func (e *TemperatureEngine) Step(dt float64) float64 {
 	cooling := e.CoolingEffect
 	heating := e.HeatingEffect
-	ambientVariation := (rand.Float64() - 0.5) * 0.2
+	ambientVariation := (rand.Float64() - 0.5) * 0.06 // 인위적 변동 30%로 축소 (was 0.2)
 	noise := (rand.Float64() - 0.5) * e.NoiseSigma * 2
 
 	e.Current += (-e.K*(e.Current-(e.Ambient+ambientVariation)) + cooling + heating) * dt
